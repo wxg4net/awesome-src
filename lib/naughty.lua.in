@@ -421,18 +421,24 @@ function naughty.notify(args)
         if icon then
             iconbox = wibox.widget.imagebox()
             iconmargin = wibox.layout.margin(iconbox, margin, margin, margin, margin)
-            if icon_size then
-                local scaled = cairo.ImageSurface(cairo.Format.ARGB32, icon_size, icon_size)
+            icon_w = icon:get_width()
+            icon_h = icon:get_height()
+            if icon_size and (icon_size < icon_w or icon_size < icon_h) then
+                if icon_w > icon_h then
+                    rate = icon_size/icon_w
+                else
+                    rate = icon_size/icon_h
+                end
+                local scaled = cairo.ImageSurface(cairo.Format.ARGB32, icon_w, icon_h)
                 local cr = cairo.Context(scaled)
-                cr:scale(icon_size / icon:get_height(), icon_size / icon:get_width())
                 cr:set_source_surface(icon, 0, 0)
                 cr:paint()
                 icon = scaled
+                icon_w = rate*icon_w
+                icon_h = rate*icon_h
             end
-            iconbox:set_resize(false)
+            iconbox:set_resize(true)
             iconbox:set_image(icon)
-            icon_w = icon:get_width()
-            icon_h = icon:get_height()
         end
     end
 
