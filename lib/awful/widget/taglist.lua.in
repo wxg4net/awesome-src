@@ -51,10 +51,7 @@ function taglist.taglist_label(t, args)
     local icon
     local bg_resize = false
     local is_selected = false
-    if t.selected then
-        bg_color = bg_focus
-        fg_color = fg_focus
-    end
+    local cls = t:clients()
     if sel then
         if taglist_squares_sel then
             -- Check that the selected clients is tagged with 't'.
@@ -69,11 +66,10 @@ function taglist.taglist_label(t, args)
             end
         end
     end
-    if t:clients() == 0 and t.selected and taglist_squares_sel_empty then
+    if #cls == 0 and t.selected and taglist_squares_sel_empty then
         bg_image = taglist_squares_sel_empty
         bg_resize = taglist_squares_resize == "true"
     elseif not is_selected then
-        local cls = t:clients()
         if #cls > 0 then
             if taglist_squares_unsel then
                 bg_image = taglist_squares_unsel
@@ -96,6 +92,10 @@ function taglist.taglist_label(t, args)
                 break
             end
         end
+    end
+    if t.selected then
+        bg_color = bg_focus
+        fg_color = fg_focus
     end
     if not tag.getproperty(t, "icon_only") then
         if fg_color then
@@ -128,13 +128,6 @@ local function taglist_update(s, w, buttons, filter, data, style, update_functio
     local function label(c) return taglist.taglist_label(c, style) end
 
     update_function(w, buttons, label, data, tags)
-end
-
---- Get the tag object the given widget appears on.
--- @param widget The widget the look for.
--- @return The tag object.
-function taglist.gettag(widget)
-    return common.tagwidgets[widget]
 end
 
 --- Create a new taglist widget. The last two arguments (update_function

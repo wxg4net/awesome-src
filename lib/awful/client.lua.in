@@ -18,6 +18,7 @@ local capi =
     client = client,
     mouse = mouse,
     screen = screen,
+    awesome = awesome,
 }
 
 -- we use require("awful.screen") inside functions to prevent circular dependencies.
@@ -34,6 +35,8 @@ client.data.focus = {}
 client.data.urgent = {}
 client.data.marked = {}
 client.data.properties = setmetatable({}, { __mode = 'k' })
+client.data.persistent_properties_registered = {} -- keys are names of persistent properties, value always true
+client.data.persistent_properties_loaded = setmetatable({}, { __mode = 'k' }) -- keys are clients, value always true
 
 -- Functions
 client.urgent = {}
@@ -43,6 +46,7 @@ client.swap = {}
 client.floating = {}
 client.dockable = {}
 client.property = {}
+client.shape = require("awful.client.shape")
 
 ---
 -- Jump to the given client.  Takes care of focussing the screen, the right tag,
@@ -231,8 +235,7 @@ function client.tiled(screen)
 end
 
 --- Get a client by its relative index to the focused window.
--- @usage Set i to 1 to get next, -1 to get previous.
--- @param i The index.
+-- @param i The index. Use 1 to get next, -1 to get previous.
 -- @param c Optional client.
 -- @return A client, or nil if no client is available.
 function client.next(i, c)
@@ -868,6 +871,15 @@ end
 -- @param prop The property name.
 -- @return The property.
 function client.property.get(c, prop)
+    if not client.data.persistent_properties_loaded[c] then
+        client.data.persistent_properties_loaded[c] = true
+        for p in pairs(client.data.persistent_properties_registered) do
+            local value = c:get_xproperty("awful.client.property." .. prop)
+            if value ~= nil then
+                client.property.set(c, p, value)
+            end
+        end
+    end
     if client.data.properties[c] then
         return client.data.properties[c][prop]
     end
@@ -882,8 +894,28 @@ function client.property.set(c, prop, value)
     if not client.data.properties[c] then
         client.data.properties[c] = {}
     end
+    if client.data.persistent_properties_registered[prop] then
+        c:set_xproperty("awful.client.property." .. prop, value)
+    end
     client.data.properties[c][prop] = value
     c:emit_signal("property::" .. prop)
+end
+
+--- Set a client property to be persistent across restarts (via X properties).
+-- @param prop The property name.
+-- @param type The type (used for register_xproperty).
+--             One of "string", "number" or "boolean".
+function client.property.persist(prop, type)
+    local xprop = "awful.client.property." .. prop
+    capi.awesome.register_xproperty(xprop, type)
+    client.data.persistent_properties_registered[prop] = true
+
+    -- Make already-set properties persistent
+    for c, tab in pairs(client.data.properties) do
+        if client.data.properties[c] and client.data.properties[c][prop] ~= nil then
+            c:set_xproperty(xprop, client.data.properties[c][prop])
+        end
+    end
 end
 
 ---
@@ -895,16 +927,15 @@ end
 -- index of the currently focused client.
 -- @param s      which screen to use.  nil means all screens.
 --
--- @usage e.g.: un-minimize all urxvt instances
--- <p><code>
--- local urxvt = function (c) <br/>
---   return awful.rules.match(c, {class = "URxvt"}) <br/>
--- end <br/>
--- </br>
--- for c in awful.client.iterate(urxvt) do <br/>
---   c.minimized = false <br/>
--- end <br/>
--- </code></p>
+-- @usage
+-- -- e.g. to un-minimize all urxvt instances:
+-- local urxvt = function (c)
+--   return awful.rules.match(c, {class = "URxvt"})
+-- end
+--
+-- for c in awful.client.iterate(urxvt) do
+--   c.minimized = false
+-- end
 function client.iterate(filter, start, s)
     local clients = capi.client.get(s)
     local focused = capi.client.focus
@@ -913,23 +944,23 @@ function client.iterate(filter, start, s)
 end
 
 ---
--- <p>Switch to a client matching the given condition if running, else spawn it.
+-- Switch to a client matching the given condition if running, else spawn it.
+--
 -- If multiple clients match the given condition then the next one is
--- focussed.</p>
+-- focussed.
 --
 -- @param cmd     the command to execute
 -- @param matcher a function that returns true to indicate a matching client
 -- @param merge   if true then merge tags when clients are not visible
 --
--- @usage run or raise urxvt (perhaps, with tabs) on modkey + semicolon
--- <p><code>
--- awful.key({ modkey, }, 'semicolon', function ()            <br/>
---   local matcher = function (c)                             <br/>
---     return awful.rules.match(c, {class = 'URxvt'}) <br/>
---   end                                                      <br/>
+-- @usage
+-- -- run or raise urxvt (perhaps, with tabs) on modkey + semicolon
+-- awful.key({ modkey, }, 'semicolon', function ()
+--   local matcher = function (c)
+--     return awful.rules.match(c, {class = 'URxvt'})
+--   end
 --   awful.client.run_or_raise('urxvt', matcher)
 -- end);
--- </code></p>
 function client.run_or_raise(cmd, matcher, merge)
     local clients = capi.client.get()
     local findex  = util.table.hasitem(clients, capi.client.focus) or 1
@@ -959,6 +990,9 @@ capi.client.connect_signal("focus", client.urgent.delete)
 capi.client.connect_signal("unmanage", client.urgent.delete)
 
 capi.client.connect_signal("unmanage", client.floating.delete)
+
+-- Register persistent properties
+client.property.persist("floating", "boolean")
 
 return client
 

@@ -107,6 +107,7 @@ target_link_libraries(${PROJECT_AWE_NAME}
 add_custom_target(lgi-check ALL
     COMMAND ${SOURCE_DIR}/build-utils/lgi-check.sh)
 
+# {{{ Generated sources
 # atoms
 file(MAKE_DIRECTORY ${BUILD_DIR}/common)
 add_custom_command(
@@ -321,6 +322,17 @@ install(FILES ${AWE_DOC_FILES} DESTINATION ${AWESOME_DOC_PATH})
 install(FILES "awesome.desktop" DESTINATION ${AWESOME_XSESSION_PATH})
 if(GENERATE_DOC)
     install(DIRECTORY ${BUILD_DIR}/doc DESTINATION ${AWESOME_DOC_PATH})
+endif()
+# }}}
+
+# {{{ Unit tests
+find_program(BUSTED_EXECUTABLE busted)
+if(BUSTED_EXECUTABLE)
+    add_custom_target(check ALL
+        ${BUSTED_EXECUTABLE} "--lpath=${CMAKE_BINARY_DIR}/lib/?.lua;${CMAKE_BINARY_DIR}/lib/?/init.lua;spec/?.lua"
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        VERBATIM)
+    add_custom_target(test DEPENDS check)
 endif()
 # }}}
 

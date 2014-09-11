@@ -36,6 +36,9 @@
 void
 systray_init(void)
 {
+    xcb_intern_atom_cookie_t atom_systray_q;
+    xcb_intern_atom_reply_t *atom_systray_r;
+    char *atom_name;
     xcb_screen_t *xscreen = globalconf.screen;
 
     globalconf.systray.window = xcb_generate_id(globalconf.connection);
@@ -45,6 +48,22 @@ systray_init(void)
                       -1, -1, 1, 1, 0,
                       XCB_COPY_FROM_PARENT, xscreen->root_visual,
                       0, NULL);
+
+    atom_name = xcb_atom_name_by_screen("_NET_SYSTEM_TRAY", globalconf.default_screen);
+    if(!atom_name)
+        fatal("error getting systray atom name");
+
+    atom_systray_q = xcb_intern_atom_unchecked(globalconf.connection, false,
+                                               a_strlen(atom_name), atom_name);
+
+    p_delete(&atom_name);
+
+    atom_systray_r = xcb_intern_atom_reply(globalconf.connection, atom_systray_q, NULL);
+    if(!atom_systray_r)
+        fatal("error getting systray atom");
+
+    globalconf.systray.atom = atom_systray_r->atom;
+    p_delete(&atom_systray_r);
 }
 
 /** Register systray in X.
@@ -54,22 +73,11 @@ systray_register(void)
 {
     xcb_client_message_event_t ev;
     xcb_screen_t *xscreen = globalconf.screen;
-    char *atom_name;
-    xcb_intern_atom_cookie_t atom_systray_q;
-    xcb_intern_atom_reply_t *atom_systray_r;
-    xcb_atom_t atom_systray;
 
-    /* Send requests */
-    if(!(atom_name = xcb_atom_name_by_screen("_NET_SYSTEM_TRAY", globalconf.default_screen)))
-    {
-        warn("error getting systray atom");
+    if(globalconf.systray.registered)
         return;
-    }
 
-    atom_systray_q = xcb_intern_atom_unchecked(globalconf.connection, false,
-                                               a_strlen(atom_name), atom_name);
-
-    p_delete(&atom_name);
+    globalconf.systray.registered = true;
 
     /* Fill event */
     p_clear(&ev, 1);
@@ -78,22 +86,13 @@ systray_register(void)
     ev.format = 32;
     ev.type = MANAGER;
     ev.data.data32[0] = XCB_CURRENT_TIME;
+    ev.data.data32[1] = globalconf.systray.atom;
     ev.data.data32[2] = globalconf.systray.window;
     ev.data.data32[3] = ev.data.data32[4] = 0;
 
-    if(!(atom_systray_r = xcb_intern_atom_reply(globalconf.connection, atom_systray_q, NULL)))
-    {
-        warn("error getting systray atom");
-        return;
-    }
-
-    ev.data.data32[1] = atom_systray = atom_systray_r->atom;
-
-    p_delete(&atom_systray_r);
-
     xcb_set_selection_owner(globalconf.connection,
                             globalconf.systray.window,
-                            atom_systray,
+                            globalconf.systray.atom,
                             XCB_CURRENT_TIME);
 
     xcb_send_event(globalconf.connection, false, xscreen->root, 0xFFFFFF, (char *) &ev);
@@ -104,30 +103,15 @@ systray_register(void)
 void
 systray_cleanup(void)
 {
-    xcb_intern_atom_reply_t *atom_systray_r;
-    char *atom_name;
-
-    if(!(atom_name = xcb_atom_name_by_screen("_NET_SYSTEM_TRAY", globalconf.default_screen))
-       || !(atom_systray_r = xcb_intern_atom_reply(globalconf.connection,
-                                                   xcb_intern_atom_unchecked(globalconf.connection,
-                                                                             false,
-                                                                             a_strlen(atom_name),
-                                                                             atom_name),
-                                                   NULL)))
-    {
-        warn("error getting systray atom");
-        p_delete(&atom_name);
+    if(!globalconf.systray.registered)
         return;
-    }
 
-    p_delete(&atom_name);
+    globalconf.systray.registered = false;
 
     xcb_set_selection_owner(globalconf.connection,
                             XCB_NONE,
-                            atom_systray_r->atom,
+                            globalconf.systray.atom,
                             XCB_CURRENT_TIME);
-
-    p_delete(&atom_systray_r);
 
     xcb_unmap_window(globalconf.connection,
                      globalconf.systray.window);
@@ -268,7 +252,7 @@ luaA_systray_invalidate(void)
 }
 
 static void
-systray_update(int base_size, bool horizontal, bool reverse)
+systray_update(int base_size, bool horizontal, bool reverse, int spacing)
 {
     if(base_size <= 0)
         return;
@@ -276,9 +260,9 @@ systray_update(int base_size, bool horizontal, bool reverse)
     /* Give the systray window the correct size */
     uint32_t config_vals[4] = { base_size, base_size, 0, 0 };
     if(horizontal)
-        config_vals[0] = base_size * globalconf.embedded.len;
+        config_vals[0] = base_size * globalconf.embedded.len + spacing * (globalconf.embedded.len - 1);
     else
-        config_vals[1] = base_size * globalconf.embedded.len;
+        config_vals[1] = base_size * globalconf.embedded.len + spacing * (globalconf.embedded.len - 1);
     xcb_configure_window(globalconf.connection,
                          globalconf.systray.window,
                          XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT,
@@ -301,9 +285,9 @@ systray_update(int base_size, bool horizontal, bool reverse)
                              config_vals);
         xcb_map_window(globalconf.connection, em->win);
         if(horizontal)
-            config_vals[0] += base_size;
+            config_vals[0] += base_size + spacing;
         else
-            config_vals[1] += base_size;
+            config_vals[1] += base_size + spacing;
     }
 }
 
@@ -315,23 +299,27 @@ systray_update(int base_size, bool horizontal, bool reverse)
  * \lparam x X position for the systray.
  * \lparam y Y position for the systray.
  * \lparam base_size The size (width and height) each systray item gets.
- * \lparam horiz If true, the systray is horizontal, else vertical
- * \lparam bg Color of the systray background
- * \lparam revers If true, the systray icon order will be reversed, else default
+ * \lparam horiz If true, the systray is horizontal, else vertical.
+ * \lparam bg Color of the systray background.
+ * \lparam revers If true, the systray icon order will be reversed, else default.
+ * \lparam spacing The size of the spacing between icons.
  */
 int
 luaA_systray(lua_State *L)
 {
+    systray_register();
+
     if(lua_gettop(L) != 0)
     {
         size_t bg_len;
         drawin_t *w = luaA_checkudata(L, 1, &drawin_class);
-        int x = luaL_checknumber(L, 2);
-        int y = luaL_checknumber(L, 3);
-        int base_size = luaL_checknumber(L, 4);
+        int x = luaL_checkinteger(L, 2);
+        int y = luaL_checkinteger(L, 3);
+        int base_size = luaL_checkinteger(L, 4);
         bool horiz = lua_toboolean(L, 5);
         const char *bg = luaL_checklstring(L, 6, &bg_len);
         bool revers = lua_toboolean(L, 7);
+        int spacing = luaL_checkinteger(L, 8);
         color_t bg_color;
 
         if(color_init_reply(color_init_unchecked(&bg_color, bg, bg_len)))
@@ -341,9 +329,6 @@ luaA_systray(lua_State *L)
                                          globalconf.systray.window,
                                          XCB_CW_BACK_PIXEL, config_back);
         }
-
-        if(globalconf.systray.parent == NULL)
-            systray_register();
 
         if(globalconf.systray.parent != w)
             xcb_reparent_window(globalconf.connection,
@@ -363,7 +348,7 @@ luaA_systray(lua_State *L)
 
         if(globalconf.embedded.len != 0)
         {
-            systray_update(base_size, horiz, revers);
+            systray_update(base_size, horiz, revers, spacing);
             xcb_map_window(globalconf.connection,
                            globalconf.systray.window);
         }
@@ -372,7 +357,7 @@ luaA_systray(lua_State *L)
                              globalconf.systray.window);
     }
 
-    lua_pushnumber(L, globalconf.embedded.len);
+    lua_pushinteger(L, globalconf.embedded.len);
     luaA_object_push(L, globalconf.systray.parent);
     return 2;
 }

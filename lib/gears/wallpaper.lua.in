@@ -138,6 +138,10 @@ function wallpaper.maximized(surf, s, ignore_aspect, offset)
 
     if offset then
         cr:translate(offset.x, offset.y)
+    elseif not ignore_aspect then
+        local scaled_width = geom.width / aspect_w
+        local scaled_height = geom.height / aspect_h
+        cr:translate((scaled_width - w) / 2, (scaled_height - h) / 2)
     end
 
     cr:set_source_surface(surf, 0, 0)
