@@ -443,6 +443,15 @@ function naughty.notify(args)
                 icon_w = rate*icon_w
                 icon_h = rate*icon_h
             end
+            if icon_h < 100 and icon_w < 100 then
+                if icon_w > icon_h then
+                    rate = 100/icon_w
+                else
+                    rate = 100/icon_h
+                end
+                icon_w = rate*icon_w
+                icon_h = rate*icon_h
+            end
             iconbox:set_resize(true)
             iconbox:set_image(icon)
         end
