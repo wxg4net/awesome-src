@@ -199,11 +199,12 @@ client_getbyframewin(xcb_window_t w)
 static void
 client_unfocus_internal(client_t *c)
 {
+    lua_State *L = globalconf_get_lua_State();
     globalconf.focus.client = NULL;
 
-    luaA_object_push(globalconf.L, c);
-    luaA_object_emit_signal(globalconf.L, -1, "unfocus", 0);
-    lua_pop(globalconf.L, 1);
+    luaA_object_push(L, c);
+    luaA_object_emit_signal(L, -1, "unfocus", 0);
+    lua_pop(L, 1);
 }
 
 /** Unfocus a client.
@@ -297,6 +298,8 @@ client_restore_enterleave_events(void)
 void
 client_focus_update(client_t *c)
 {
+    lua_State *L = globalconf_get_lua_State();
+
     if(!client_maybevisible(c))
         return;
 
@@ -317,11 +320,11 @@ client_focus_update(client_t *c)
     globalconf.focus.client = c;
 
     /* according to EWMH, we have to remove the urgent state from a client */
-    luaA_object_push(globalconf.L, c);
-    client_set_urgent(globalconf.L, -1, false);
+    luaA_object_push(L, c);
+    client_set_urgent(L, -1, false);
 
-    luaA_object_emit_signal(globalconf.L, -1, "focus", 0);
-    lua_pop(globalconf.L, 1);
+    luaA_object_emit_signal(L, -1, "focus", 0);
+    lua_pop(L, 1);
 }
 
 /** Give focus to client, or to first client if client is NULL.
@@ -378,7 +381,7 @@ client_focus_refresh(void)
 }
 
 static void
-client_update_properties(client_t *c)
+client_update_properties(lua_State *L, int cidx, client_t *c)
 {
     /* get all hints */
     xcb_get_property_cookie_t wm_normal_hints   = property_get_wm_normal_hints(c);
@@ -415,7 +418,7 @@ client_update_properties(client_t *c)
     property_update_net_wm_icon_name(c, net_wm_icon_name);
     property_update_wm_class(c, wm_class);
     property_update_wm_protocols(c, wm_protocols);
-    window_set_opacity(globalconf.L, -1, xwindow_get_opacity_from_cookie(opacity));
+    window_set_opacity(L, cidx, xwindow_get_opacity_from_cookie(opacity));
 }
 
 /** Manage a new client.
@@ -426,6 +429,7 @@ client_update_properties(client_t *c)
 void
 client_manage(xcb_window_t w, xcb_get_geometry_reply_t *wgeom, xcb_get_window_attributes_reply_t *wattr)
 {
+    lua_State *L = globalconf_get_lua_State();
     const uint32_t select_input_val[] = { CLIENT_SELECT_INPUT_EVENT_MASK };
 
     if(systray_iskdedockapp(w))
@@ -445,7 +449,7 @@ client_manage(xcb_window_t w, xcb_get_geometry_reply_t *wgeom, xcb_get_window_at
     if (globalconf.have_shape)
         xcb_shape_select_input(globalconf.connection, w, 1);
 
-    client_t *c = client_new(globalconf.L);
+    client_t *c = client_new(L);
     xcb_screen_t *s = globalconf.screen;
 
     /* consider the window banned */
@@ -493,7 +497,7 @@ client_manage(xcb_window_t w, xcb_get_geometry_reply_t *wgeom, xcb_get_window_at
      * (Else, reparent could cause an UnmapNotify) */
     xcb_change_window_attributes(globalconf.connection, w, XCB_CW_EVENT_MASK, select_input_val);
 
-    luaA_object_emit_signal(globalconf.L, -1, "property::window", 0);
+    luaA_object_emit_signal(L, -1, "property::window", 0);
 
     /* The frame window gets the border, not the real client window */
     xcb_configure_window(globalconf.connection, w,
@@ -509,8 +513,8 @@ client_manage(xcb_window_t w, xcb_get_geometry_reply_t *wgeom, xcb_get_window_at
                          (uint32_t[]) { XCB_STACK_MODE_BELOW});
 
     /* Duplicate client and push it in client list */
-    lua_pushvalue(globalconf.L, -1);
-    client_array_push(&globalconf.clients, luaA_object_ref(globalconf.L, -1));
+    lua_pushvalue(L, -1);
+    client_array_push(&globalconf.clients, luaA_object_ref(L, -1));
 
     /* Set the right screen */
     screen_client_moveto(c, screen_getbycoord(wgeom->x, wgeom->y), false);
@@ -519,24 +523,24 @@ client_manage(xcb_window_t w, xcb_get_geometry_reply_t *wgeom, xcb_get_window_at
      * been set. */
 #define HANDLE_GEOM(attr) \
     c->geometry.attr = wgeom->attr; \
-    luaA_object_emit_signal(globalconf.L, -1, "property::" #attr, 0);
+    luaA_object_emit_signal(L, -1, "property::" #attr, 0);
 HANDLE_GEOM(x)
 HANDLE_GEOM(y)
 HANDLE_GEOM(width)
 HANDLE_GEOM(height)
 #undef HANDLE_GEOM
 
-    luaA_object_emit_signal(globalconf.L, -1, "property::geometry", 0);
+    luaA_object_emit_signal(L, -1, "property::geometry", 0);
 
     /* Set border width */
-    window_set_border_width(globalconf.L, -1, wgeom->border_width);
+    window_set_border_width(L, -1, wgeom->border_width);
 
     /* we honor size hints by default */
     c->size_hints_honor = true;
-    luaA_object_emit_signal(globalconf.L, -1, "property::size_hints_honor", 0);
+    luaA_object_emit_signal(L, -1, "property::size_hints_honor", 0);
 
     /* update all properties */
-    client_update_properties(c);
+    client_update_properties(L, -1, c);
 
     /* Then check clients hints */
     ewmh_client_check_hints(c);
@@ -571,12 +575,12 @@ HANDLE_GEOM(height)
     p_delete(&reply);
     spawn_start_notify(c, startup_id);
 
-    luaA_class_emit_signal(globalconf.L, &client_class, "list", 0);
+    luaA_class_emit_signal(L, &client_class, "list", 0);
 
     /* client is still on top of the stack; emit signal */
-    luaA_object_emit_signal(globalconf.L, -1, "manage", 0);
+    luaA_object_emit_signal(L, -1, "manage", 0);
     /* pop client */
-    lua_pop(globalconf.L, 1);
+    lua_pop(L, 1);
 }
 
 static void
@@ -721,6 +725,7 @@ client_apply_size_hints(client_t *c, area_t geometry)
 static void
 client_resize_do(client_t *c, area_t geometry, bool force_notice, bool honor_hints)
 {
+    lua_State *L = globalconf_get_lua_State();
     bool send_notice = force_notice;
     bool hide_titlebars = c->fullscreen;
     screen_t *new_screen = screen_getbycoord(geometry.x, geometry.y);
@@ -767,17 +772,17 @@ client_resize_do(client_t *c, area_t geometry, bool force_notice, bool honor_hin
 
     client_restore_enterleave_events();
 
-    luaA_object_push(globalconf.L, c);
-    luaA_object_emit_signal(globalconf.L, -1, "property::geometry", 0);
+    luaA_object_push(L, c);
+    luaA_object_emit_signal(L, -1, "property::geometry", 0);
     if (old_geometry.x != geometry.x)
-        luaA_object_emit_signal(globalconf.L, -1, "property::x", 0);
+        luaA_object_emit_signal(L, -1, "property::x", 0);
     if (old_geometry.y != geometry.y)
-        luaA_object_emit_signal(globalconf.L, -1, "property::y", 0);
+        luaA_object_emit_signal(L, -1, "property::y", 0);
     if (old_geometry.width != geometry.width)
-        luaA_object_emit_signal(globalconf.L, -1, "property::width", 0);
+        luaA_object_emit_signal(L, -1, "property::width", 0);
     if (old_geometry.height != geometry.height)
-        luaA_object_emit_signal(globalconf.L, -1, "property::height", 0);
-    lua_pop(globalconf.L, 1);
+        luaA_object_emit_signal(L, -1, "property::height", 0);
+    lua_pop(L, 1);
 
     screen_client_moveto(c, new_screen, false);
 
@@ -786,9 +791,9 @@ client_resize_do(client_t *c, area_t geometry, bool force_notice, bool honor_hin
         if (c->titlebar[bar].drawable == NULL && c->titlebar[bar].size == 0)
             continue;
 
-        luaA_object_push(globalconf.L, c);
-        drawable_t *drawable = titlebar_get_drawable(globalconf.L, c, -1, bar);
-        luaA_object_push_item(globalconf.L, -1, drawable);
+        luaA_object_push(L, c);
+        drawable_t *drawable = titlebar_get_drawable(L, c, -1, bar);
+        luaA_object_push_item(L, -1, drawable);
 
         area_t area = titlebar_get_area(c, bar);
 
@@ -797,10 +802,10 @@ client_resize_do(client_t *c, area_t geometry, bool force_notice, bool honor_hin
         area.y += geometry.y;
         if (hide_titlebars)
             area.width = area.height = 0;
-        drawable_set_geometry(drawable, -1, area);
+        drawable_set_geometry(L, -1, area);
 
         /* Pop the client and the drawable */
-        lua_pop(globalconf.L, 2);
+        lua_pop(L, 2);
     }
 }
 
@@ -1102,6 +1107,7 @@ client_set_ontop(lua_State *L, int cidx, bool s)
 void
 client_unban(client_t *c)
 {
+    lua_State *L = globalconf_get_lua_State();
     if(c->isbanned)
     {
         xcb_map_window(globalconf.connection, c->frame_window);
@@ -1109,10 +1115,10 @@ client_unban(client_t *c)
         c->isbanned = false;
 
         /* An unbanned client shouldn't be minimized or hidden */
-        luaA_object_push(globalconf.L, c);
-        client_set_minimized(globalconf.L, -1, false);
-        client_set_hidden(globalconf.L, -1, false);
-        lua_pop(globalconf.L, 1);
+        luaA_object_push(L, c);
+        client_set_minimized(L, -1, false);
+        client_set_hidden(L, -1, false);
+        lua_pop(L, 1);
     }
 }
 
@@ -1123,6 +1129,8 @@ client_unban(client_t *c)
 void
 client_unmanage(client_t *c, bool window_valid)
 {
+    lua_State *L = globalconf_get_lua_State();
+
     /* Reset transient_for attributes of windows that might be referring to us */
     foreach(_tc, globalconf.clients)
     {
@@ -1145,14 +1153,14 @@ client_unmanage(client_t *c, bool window_valid)
     for(int i = 0; i < globalconf.tags.len; i++)
         untag_client(c, globalconf.tags.tab[i]);
 
-    luaA_object_push(globalconf.L, c);
-    luaA_object_emit_signal(globalconf.L, -1, "unmanage", 0);
-    lua_pop(globalconf.L, 1);
+    luaA_object_push(L, c);
+    luaA_object_emit_signal(L, -1, "unmanage", 0);
+    lua_pop(L, 1);
 
-    luaA_class_emit_signal(globalconf.L, &client_class, "list", 0);
+    luaA_class_emit_signal(L, &client_class, "list", 0);
 
     if(strut_has_value(&c->strut))
-        client_emit_property_workarea_on_screen(globalconf.L, c);
+        client_emit_property_workarea_on_screen(L, c);
 
     /* Get rid of all titlebars */
     for (client_titlebar_t bar = CLIENT_TITLEBAR_TOP; bar < CLIENT_TITLEBAR_COUNT; bar++) {
@@ -1160,10 +1168,10 @@ client_unmanage(client_t *c, bool window_valid)
             continue;
 
         /* Forget about the drawable */
-        luaA_object_push(globalconf.L, c);
-        luaA_object_unref_item(globalconf.L, -1, c->titlebar[bar].drawable);
+        luaA_object_push(L, c);
+        luaA_object_unref_item(L, -1, c->titlebar[bar].drawable);
         c->titlebar[bar].drawable = NULL;
-        lua_pop(globalconf.L, 1);
+        lua_pop(L, 1);
     }
 
     /* Clear our event mask so that we don't receive any events from now on,
@@ -1206,7 +1214,7 @@ client_unmanage(client_t *c, bool window_valid)
     /* set client as invalid */
     c->window = XCB_NONE;
 
-    luaA_object_unref(globalconf.L, c);
+    luaA_object_unref(L, c);
 }
 
 /** Kill a client via a WM_DELETE_WINDOW request or KillClient if not
@@ -1287,16 +1295,83 @@ luaA_client_isvisible(lua_State *L)
 void
 client_set_icon(client_t *c, cairo_surface_t *s)
 {
+    lua_State *L = globalconf_get_lua_State();
+
     if (s)
         s = draw_dup_image_surface(s);
     if(c->icon)
         cairo_surface_destroy(c->icon);
     c->icon = s;
 
-    luaA_object_push(globalconf.L, c);
-    luaA_object_emit_signal(globalconf.L, -1, "property::icon", 0);
-    lua_pop(globalconf.L, 1);
+    luaA_object_push(L, c);
+    luaA_object_emit_signal(L, -1, "property::icon", 0);
+    lua_pop(L, 1);
 }
+
+/** Set a client icon.
+ * \param c The client to change.
+ * \param icon A bitmap containing the icon.
+ * \param mask A mask for the bitmap (optional)
+ */
+void
+client_set_icon_from_pixmaps(client_t *c, xcb_pixmap_t icon, xcb_pixmap_t mask)
+{
+    xcb_get_geometry_cookie_t geom_icon_c, geom_mask_c;
+    xcb_get_geometry_reply_t *geom_icon_r, *geom_mask_r = NULL;
+    cairo_surface_t *s_icon, *result;
+
+    geom_icon_c = xcb_get_geometry_unchecked(globalconf.connection, icon);
+    if (mask)
+        geom_mask_c = xcb_get_geometry_unchecked(globalconf.connection, mask);
+    geom_icon_r = xcb_get_geometry_reply(globalconf.connection, geom_icon_c, NULL);
+    if (mask)
+        geom_mask_r = xcb_get_geometry_reply(globalconf.connection, geom_mask_c, NULL);
+
+    if (!geom_icon_r || (mask && !geom_mask_r))
+        goto out;
+    if ((geom_icon_r->depth != 1 && geom_icon_r->depth != globalconf.screen->root_depth)
+            || (geom_mask_r && geom_mask_r->depth != 1))
+    {
+        warn("Got pixmaps with depth (%d, %d) while processing icon, but only depth 1 and %d are allowed",
+                geom_icon_r->depth, geom_mask_r ? geom_mask_r->depth : 0, globalconf.screen->root_depth);
+        goto out;
+    }
+
+    if (geom_icon_r->depth == 1)
+        s_icon = cairo_xcb_surface_create_for_bitmap(globalconf.connection,
+                globalconf.screen, icon, geom_icon_r->width, geom_icon_r->height);
+    else
+        s_icon = cairo_xcb_surface_create(globalconf.connection, icon, globalconf.default_visual,
+                geom_icon_r->width, geom_icon_r->height);
+    result = s_icon;
+
+    if (mask)
+    {
+        cairo_surface_t *s_mask;
+        cairo_t *cr;
+
+        result = cairo_surface_create_similar(s_icon, CAIRO_CONTENT_COLOR_ALPHA, geom_icon_r->width, geom_icon_r->height);
+        s_mask = cairo_xcb_surface_create_for_bitmap(globalconf.connection,
+                globalconf.screen, mask, geom_icon_r->width, geom_icon_r->height);
+        cr = cairo_create(result);
+
+        cairo_set_source_surface(cr, s_icon, 0, 0);
+        cairo_mask_surface(cr, s_mask, 0, 0);
+        cairo_surface_destroy(s_mask);
+        cairo_destroy(cr);
+    }
+
+    client_set_icon(c, result);
+
+    cairo_surface_destroy(result);
+    if (result != s_icon)
+        cairo_surface_destroy(s_icon);
+
+out:
+    p_delete(&geom_icon_r);
+    p_delete(&geom_mask_r);
+}
+
 
 /** Kill a client.
  * \param L The Lua VM state.
@@ -1340,7 +1415,7 @@ luaA_client_swap(lua_State *L)
         *ref_c = swap;
         *ref_swap = c;
 
-        luaA_class_emit_signal(globalconf.L, &client_class, "list", 0);
+        luaA_class_emit_signal(L, &client_class, "list", 0);
     }
 
     return 0;
@@ -1384,7 +1459,7 @@ luaA_client_tags(lua_State *L)
         }
         lua_pushnil(L);
         while(lua_next(L, 2))
-            tag_client(c);
+            tag_client(L, c);
         lua_pop(L, 1);
     }
 
@@ -1584,8 +1659,10 @@ titlebar_get_drawable(lua_State *L, client_t *c, int cl_idx, client_titlebar_t b
 }
 
 static void
-titlebar_resize(client_t *c, client_titlebar_t bar, int size)
+titlebar_resize(lua_State *L, int cidx, client_t *c, client_titlebar_t bar, int size)
 {
+    const char *property_name;
+
     if (size < 0)
         return;
 
@@ -1598,12 +1675,20 @@ titlebar_resize(client_t *c, client_titlebar_t bar, int size)
     int change = size - c->titlebar[bar].size;
     switch (bar) {
     case CLIENT_TITLEBAR_TOP:
+        geometry.height += change;
+        property_name = "property::titlebar_top";
+        break;
     case CLIENT_TITLEBAR_BOTTOM:
         geometry.height += change;
+        property_name = "property::titlebar_bottom";
         break;
     case CLIENT_TITLEBAR_RIGHT:
+        geometry.width += change;
+        property_name = "property::titlebar_right";
+        break;
     case CLIENT_TITLEBAR_LEFT:
         geometry.width += change;
+        property_name = "property::titlebar_left";
         break;
     default:
         fatal("Unknown titlebar kind %d\n", (int) bar);
@@ -1611,6 +1696,8 @@ titlebar_resize(client_t *c, client_titlebar_t bar, int size)
 
     c->titlebar[bar].size = size;
     client_resize_do(c, geometry, true, false);
+
+    luaA_object_emit_signal(L, cidx, property_name, 0);
 }
 
 #define HANDLE_TITLEBAR(name, index)                              \
@@ -1622,9 +1709,9 @@ luaA_client_titlebar_ ## name(lua_State *L)                       \
     if (lua_gettop(L) == 2)                                       \
     {                                                             \
         if (lua_isnil(L, 2))                                      \
-            titlebar_resize(c, index, 0);                         \
+            titlebar_resize(L, 1, c, index, 0);                   \
         else                                                      \
-            titlebar_resize(c, index, luaL_checknumber(L, 2));    \
+            titlebar_resize(L, 1, c, index, luaL_checknumber(L, 2)); \
     }                                                             \
                                                                   \
     luaA_object_push_item(L, 1, titlebar_get_drawable(L, c, 1, index)); \
@@ -2134,6 +2221,19 @@ luaA_client_keys(lua_State *L)
     return luaA_key_array_get(L, 1, keys);
 }
 
+static int
+client_tostring(lua_State *L, client_t *c)
+{
+    char *name = c->name ? c->name : c->alt_name;
+    ssize_t len = a_strlen(name);
+    ssize_t limit = 20;
+
+    lua_pushlstring(L, name, MIN(len, limit));
+    if (len > limit)
+        lua_pushstring(L, "...");
+    return len > limit ? 2 : 1;
+}
+
 /* Client module.
  * \param L The Lua VM state.
  * \return The number of pushed elements.
@@ -2144,7 +2244,7 @@ luaA_client_module_index(lua_State *L)
     const char *buf = luaL_checkstring(L, 2);
 
     if (A_STREQ(buf, "focus"))
-        return luaA_object_push(globalconf.L, globalconf.focus.client);
+        return luaA_object_push(L, globalconf.focus.client);
     return 0;
 }
 
@@ -2211,6 +2311,7 @@ client_class_setup(lua_State *L)
                      (lua_class_checker_t) client_checker,
                      luaA_class_index_miss_property, luaA_class_newindex_miss_property,
                      client_methods, client_meta);
+    luaA_class_set_tostring(&client_class, (lua_class_propfunc_t) client_tostring);
     luaA_class_add_property(&client_class, "name",
                             NULL,
                             (lua_class_propfunc_t) luaA_client_get_name,
@@ -2391,6 +2492,10 @@ client_class_setup(lua_State *L)
     signal_add(&client_class.signals, "property::skip_taskbar");
     signal_add(&client_class.signals, "property::sticky");
     signal_add(&client_class.signals, "property::struts");
+    signal_add(&client_class.signals, "property::titlebar_bottom");
+    signal_add(&client_class.signals, "property::titlebar_left");
+    signal_add(&client_class.signals, "property::titlebar_right");
+    signal_add(&client_class.signals, "property::titlebar_top");
     signal_add(&client_class.signals, "property::transient_for");
     signal_add(&client_class.signals, "property::type");
     signal_add(&client_class.signals, "property::urgent");
