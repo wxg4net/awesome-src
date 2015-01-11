@@ -12,8 +12,6 @@ local string = string
 local tostring = tostring
 local pcall = pcall
 local capi = { screen = screen,
-               awesome = awesome,
-               dbus = dbus,
                awesome = awesome }
 local timer = require("gears.timer")
 local button = require("awful.button")
@@ -22,11 +20,6 @@ local bt = require("beautiful")
 local wibox = require("wibox")
 local surface = require("gears.surface")
 local cairo = require("lgi").cairo
-
-local schar = string.char
-local sbyte = string.byte
-local tcat = table.concat
-local tins = table.insert
 
 --- Notification library
 local naughty = {}
@@ -88,23 +81,12 @@ naughty.config.defaults = {
     position = "top_right"
 }
 
--- DBUS Notification constants
-local urgency = {
-    low = "\0",
-    normal = "\1",
-    critical = "\2"
-}
-
---- DBUS notification to preset mapping
--- The first element is an object containing the filter
--- If the rules in the filter matches the associated preset will be applied
--- The rules object can contain: urgency, category, appname
--- The second element is the preset
-
-naughty.config.mapping = {
-    {{urgency = urgency.low}, naughty.config.presets.low},
-    {{urgency = urgency.normal}, naughty.config.presets.normal},
-    {{urgency = urgency.critical}, naughty.config.presets.critical}
+naughty.notificationClosedReason = {
+    silent = -1,
+    expired = 1,
+    dismissedByUser = 2,
+    dismissedByCommand = 3,
+    undefined = 4
 }
 
 -- Counter for the notifications
@@ -213,8 +195,9 @@ end
 
 --- Destroy notification by notification object
 -- @param notification Notification object to be destroyed
+-- @param reason One of the reasons from notificationClosedReason
 -- @return True if the popup was successfully destroyed, nil otherwise
-function naughty.destroy(notification)
+function naughty.destroy(notification, reason)
     if notification and notification.box.visible then
         if suspended then
             for k, v in pairs(naughty.notifications.suspended) do
@@ -231,6 +214,9 @@ function naughty.destroy(notification)
         end
         notification.box.visible = false
         arrange(scr)
+        if notification.destroy_cb and reason ~= naughty.notificationClosedReason.silent then
+            notification.destroy_cb(reason or naughty.notificationClosedReason.undefined)
+        end
         return true
     end
 end
@@ -238,7 +224,7 @@ end
 -- Get notification by ID
 -- @param id ID of the notification
 -- @return notification object if it was found, nil otherwise
-local function getById(id)
+function naughty.getById(id)
     -- iterate the notifications to get the notfications with the correct ID
     for s = 1, capi.screen.count() do
         for p,pos in pairs(naughty.notifications[s]) do
@@ -273,12 +259,15 @@ end
 -- @param border_color Border color.
 --   Default: beautiful.border_focus or '#535d6c'
 -- @param run Function to run on left click. Default: nil
+-- @param destroy Function to run when notification is destroyed. Default: nil
 -- @param preset Table with any of the above parameters. Note: Any parameters
 --   specified directly in args will override ones defined in the preset.
 -- @param replaces_id Replace the notification with the given ID
 -- @param callback function that will be called with all arguments
 --  the notification will only be displayed if the function returns true
 --  note: this function is only relevant to notifications sent via dbus
+-- @param actions mapping that maps a string to a callback when this action is
+--  selected
 -- @usage naughty.notify({ title = "Achtung!", text = "You're idling", timeout = 0 })
 -- @return The notification object
 function naughty.notify(args)
@@ -304,6 +293,8 @@ function naughty.notify(args)
     local margin = args.margin or preset.margin
     local border_width = args.border_width or preset.border_width
     local position = args.position or preset.position
+    local actions = args.actions
+    local destroy_cb = args.destroy
     local escape_pattern = "[<>&]"
     local escape_subs = { ['<'] = "&lt;", ['>'] = "&gt;", ['&'] = "&amp;" }
 
@@ -313,14 +304,14 @@ function naughty.notify(args)
     local fg = args.fg or preset.fg or beautiful.fg_normal or '#ffffff'
     local bg = args.bg or preset.bg or beautiful.bg_normal or '#535d6c'
     local border_color = args.border_color or preset.border_color or beautiful.bg_focus or '#535d6c'
-    local notification = { screen = screen }
+    local notification = { screen = screen, destroy_cb = destroy_cb }
 
     -- replace notification if needed
     if args.replaces_id then
-        local obj = getById(args.replaces_id)
+        local obj = naughty.getById(args.replaces_id)
         if obj then
             -- destroy this and ...
-            naughty.destroy(obj)
+            naughty.destroy(obj, naughty.notificationClosedReason.silent)
         end
         -- ... may use its ID
         if args.replaces_id <= counter then
@@ -340,10 +331,12 @@ function naughty.notify(args)
     if title then title = title .. "\n" else title = "" end
 
     -- hook destroy
-    local die = function () naughty.destroy(notification) end
+    local die = function (reason)
+        naughty.destroy(notification, reason)
+    end
     if timeout > 0 then
         local timer_die = timer { timeout = timeout }
-        timer_die:connect_signal("timeout", die)
+        timer_die:connect_signal("timeout", function() die(naughty.notificationClosedReason.expired) end)
         if not suspended then
             timer_die:start()
         end
@@ -355,17 +348,17 @@ function naughty.notify(args)
         if args.run then
             args.run(notification)
         else
-            die()
+            die(naughty.notificationClosedReason.dismissedByUser)
         end
     end
 
     local hover_destroy = function ()
         if hover_timeout == 0 then
-            die()
+            die(naughty.notificationClosedReason.expired)
         else
             if notification.timer then notification.timer:stop() end
             notification.timer = timer { timeout = hover_timeout }
-            notification.timer:connect_signal("timeout", die)
+            notification.timer:connect_signal("timeout", function() die(naughty.notificationClosedReason.expired) end)
             notification.timer:start()
         end
     end
@@ -396,6 +389,36 @@ function naughty.notify(args)
             -- Ok, just ignore all pango markup. If this fails, we got some invalid utf8
             if not pcall(setText) then
                 textbox:set_markup("<i>&lt;Invalid markup or UTF8, cannot display message&gt;</i>")
+            end
+        end
+    end
+
+    local actionslayout = wibox.layout.fixed.vertical()
+    local actions_max_width = 0
+    local actions_total_height = 0
+    if actions then
+        for action, callback in pairs(actions) do
+            local actiontextbox = wibox.widget.textbox()
+            local actionmarginbox = wibox.layout.margin()
+            actionmarginbox:set_margins(margin)
+            actionmarginbox:set_widget(actiontextbox)
+            actiontextbox:set_valign("middle")
+            actiontextbox:set_font(font)
+            actiontextbox:set_markup(string.format('<b>%s</b>', action))
+            -- calculate the height and width
+            local w, h = actiontextbox:fit(-1, -1)
+            local height = h + 2 * margin
+            local width = w + 2 * margin
+
+            actionmarginbox:buttons(util.table.join(
+                button({ }, 1, callback),
+                button({ }, 3, callback)
+                ))
+            actionslayout:add(actionmarginbox)
+
+            actions_total_height = actions_total_height + height
+            if actions_max_width < width then
+                actions_max_width = width
             end
         end
     end
@@ -476,10 +499,16 @@ function naughty.notify(args)
         end
     end
 
+    height = height + actions_total_height
+
     -- calculate the width
     if not width then
         local w, h = textbox:fit(-1, -1)
         width = w + (iconbox and icon_w + 2 * margin or 0) + 2 * margin
+    end
+
+    if width < actions_max_width then
+        width = actions_max_width
     end
 
     -- crop to workarea size if too big
@@ -512,10 +541,17 @@ function naughty.notify(args)
         layout:add(iconmargin)
     end
     layout:add(marginbox)
-    notification.box:set_widget(layout)
+
+    local completelayout = wibox.layout.fixed.vertical()
+    completelayout:add(layout)
+    completelayout:add(actionslayout)
+    notification.box:set_widget(completelayout)
 
     -- Setup the mouse events
-    layout:buttons(util.table.join(button({ }, 1, run), button({ }, 3, die)))
+    layout:buttons(util.table.join(button({ }, 1, run),
+                                   button({ }, 3, function()
+                                        die(naughty.notificationClosedReason.dismissedByUser)
+                                    end)))
 
     -- insert the notification to the table
     table.insert(naughty.notifications[screen][notification.position], notification)
@@ -527,165 +563,6 @@ function naughty.notify(args)
 
     -- return the notification
     return notification
-end
-
--- DBUS/Notification support
--- Notify
-if capi.dbus then
-    capi.dbus.connect_signal("org.freedesktop.Notifications", function (data, appname, replaces_id, icon, title, text, actions, hints, expire)
-    local args = { }
-    if data.member == "Notify" then
-        if text ~= "" then
-            args.text = text
-            if title ~= "" then
-                args.title = title
-            end
-        else
-            if title ~= "" then
-                args.text = title
-            else
-                return
-            end
-        end
-        if appname ~= "" then
-            args.appname = appname
-        end
-        for i, obj in pairs(naughty.config.mapping) do
-            local filter, preset, s = obj[1], obj[2], 0
-            if (not filter.urgency or filter.urgency == hints.urgency) and
-               (not filter.category or filter.category == hints.category) and
-               (not filter.appname or filter.appname == appname) then
-                   args.preset = util.table.join(args.preset, preset)
-            end
-        end
-        local preset = args.preset or naughty.config.defaults
-        if not preset.callback or (type(preset.callback) == "function" and
-            preset.callback(data, appname, replaces_id, icon, title, text, actions, hints, expire)) then
-            if icon ~= "" then
-                args.icon = icon
-            elseif hints.icon_data or hints.image_data then
-                if hints.icon_data == nil then hints.icon_data = hints.image_data end
-
-                -- icon_data is an array:
-                -- 1 -> width
-                -- 2 -> height
-                -- 3 -> rowstride
-                -- 4 -> has alpha
-                -- 5 -> bits per sample
-                -- 6 -> channels
-                -- 7 -> data
-                local w, h, rowstride, _, _, channels, data = unpack(hints.icon_data)
-
-                -- Do the arguments look sane? (e.g. we have enough data)
-                local expected_length = rowstride * (h - 1) + w * channels
-                if w < 0 or h < 0 or rowstride < 0 or (channels ~= 3 and channels ~= 4) or
-                    string.len(data) < expected_length then
-                    w = 0
-                    h = 0
-                end
-
-                local format = cairo.Format[channels == 4 and 'ARGB32' or 'RGB24']
-
-                -- Figure out some stride magic (cairo dictates rowstride)
-                local stride = cairo.Format.stride_for_width(format, w)
-                local append = schar(0):rep(stride - 4 * w)
-                local offset = 0
-
-                -- Now convert each row on its own
-                local rows = {}
-
-                for y = 1, h do
-                    local this_row = {}
-
-                    for i = 1 + offset, w * channels + offset, channels do
-                        local R, G, B, A = sbyte(data, i, i + channels - 1)
-                        tins(this_row, schar(B, G, R, A or 255))
-                    end
-
-                    -- Handle rowstride, offset is stride for the input, append for output
-                    tins(this_row, append)
-                    tins(rows, tcat(this_row))
-
-                    offset = offset + rowstride
-                end
-
-                args.icon = cairo.ImageSurface.create_for_data(tcat(rows), format,
-                    w, h, stride)
-            end
-            if replaces_id and replaces_id ~= "" and replaces_id ~= 0 then
-                args.replaces_id = replaces_id
-            end
-            if expire and expire > -1 then
-                args.timeout = expire / 1000
-            end
-            local id = naughty.notify(args).id
-            return "u", id
-        end
-        return "u", "0"
-    elseif data.member == "CloseNotification" then
-        local obj = getById(appname)
-        if obj then
-           naughty.destroy(obj)
-        end
-    elseif data.member == "GetServerInfo" or data.member == "GetServerInformation" then
-        -- name of notification app, name of vender, version
-        return "s", "naughty", "s", "awesome", "s", capi.awesome.version:match("%d.%d"), "s", "1.0"
-    elseif data.member == "GetCapabilities" then
-        -- We actually do display the body of the message, we support <b>, <i>
-        -- and <u> in the body and we handle static (non-animated) icons.
-        return "as", { "s", "body", "s", "body-markup", "s", "icon-static" }
-    end
-    end)
-
-    capi.dbus.connect_signal("org.freedesktop.DBus.Introspectable",
-    function (data, text)
-    if data.member == "Introspect" then
-        local xml = [=[<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object
-    Introspection 1.0//EN"
-    "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
-    <node>
-      <interface name="org.freedesktop.DBus.Introspectable">
-        <method name="Introspect">
-          <arg name="data" direction="out" type="s"/>
-        </method>
-      </interface>
-      <interface name="org.freedesktop.Notifications">
-        <method name="GetCapabilities">
-          <arg name="caps" type="as" direction="out"/>
-        </method>
-        <method name="CloseNotification">
-          <arg name="id" type="u" direction="in"/>
-        </method>
-        <method name="Notify">
-          <arg name="app_name" type="s" direction="in"/>
-          <arg name="id" type="u" direction="in"/>
-          <arg name="icon" type="s" direction="in"/>
-          <arg name="summary" type="s" direction="in"/>
-          <arg name="body" type="s" direction="in"/>
-          <arg name="actions" type="as" direction="in"/>
-          <arg name="hints" type="a{sv}" direction="in"/>
-          <arg name="timeout" type="i" direction="in"/>
-          <arg name="return_id" type="u" direction="out"/>
-        </method>
-        <method name="GetServerInformation">
-          <arg name="return_name" type="s" direction="out"/>
-          <arg name="return_vendor" type="s" direction="out"/>
-          <arg name="return_version" type="s" direction="out"/>
-          <arg name="return_spec_version" type="s" direction="out"/>
-        </method>
-        <method name="GetServerInfo">
-          <arg name="return_name" type="s" direction="out"/>
-          <arg name="return_vendor" type="s" direction="out"/>
-          <arg name="return_version" type="s" direction="out"/>
-       </method>
-      </interface>
-    </node>]=]
-        return "s", xml
-    end
-    end)
-
-    -- listen for dbus notification requests
-    capi.dbus.request_name("session", "org.freedesktop.Notifications")
 end
 
 return naughty
