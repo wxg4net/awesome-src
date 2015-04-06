@@ -1,7 +1,43 @@
 -------------------------------------------------------------------------
--- @author Sébastien Gross &lt;seb•ɱɩɲʋʃ•awesome•ɑƬ•chezwam•ɖɵʈ•org&gt
+--- Tooltip module for awesome objects.
+--
+-- A tooltip is a small hint displayed when the mouse cursor
+-- hovers a specific item.
+-- In awesome, a tooltip can be linked with almost any
+-- object having a `:connect_signal()` method and receiving
+-- `mouse::enter` and `mouse::leave` signals.
+--
+-- How to create a tooltip?
+-- ---
+--
+--     myclock = awful.widget.textclock({}, "%T", 1)
+--     myclock_t = awful.tooltip({
+--         objects = { myclock },
+--         timer_function = function()
+--                 return os.date("Today is %A %B %d %Y\nThe time is %T")
+--             end,
+--         })
+--
+-- How to add the same tooltip to several objects?
+-- ---
+--
+--     myclock_t:add_to_object(obj1)
+--     myclock_t:add_to_object(obj2)
+--
+-- Now the same tooltip is attached to `myclock`, `obj1`, `obj2`.
+--
+-- How to remove tooltip from many objects?
+-- ---
+--
+--     myclock_t:remove_from_object(obj1)
+--     myclock_t:remove_from_object(obj2)
+--
+-- Now the same tooltip is only attached to `myclock`.
+--
+-- @author Sébastien Gross &lt;seb•ɱɩɲʋʃ•awesome•ɑƬ•chezwam•ɖɵʈ•org&gt;
 -- @copyright 2009 Sébastien Gross
 -- @release @AWESOME_VERSION@
+-- @module awful.tooltip
 -------------------------------------------------------------------------
 
 local mouse = mouse
@@ -15,59 +51,24 @@ local background = require("wibox.widget.background")
 local setmetatable = setmetatable
 local ipairs = ipairs
 
---- Tooltip module for awesome objects.
--- A tooltip is a small hint displayed when the mouse cursor
--- hovers a specific item.
--- In awesome, a tooltip can be linked with almost any
--- object having a <code>connect_signal()</code> method and receiving
--- <code>mouse::enter</code> and <code>mouse::leave</code> signals.
--- <p>How to create a tooltip?<br/>
---  <code>
---  myclock = awful.widget.textclock({}, "%T", 1)<br/>
---  myclock_t = awful.tooltip({<br/>
---      objects = { myclock },<br/>
---      timer_function = function()<br/>
---              return os.date("Today is %A %B %d %Y\nThe time is %T")<br/>
---          end,<br/>
---      })<br/>
---  </code>
--- </p>
--- <p>How to add the same tooltip to several objects?<br/>
--- <code>
---     myclock_t:add_to_object(obj1)<br/>
---     myclock_t:add_to_object(obj2)<br/>
--- </code>
--- Now the same tooltip is attached to <code>myclock</code>, <code>obj1</code>,
---    <code>obj2</code>.<br/>
--- </p>
--- <p>How to remove tooltip from many objects?<br/>
--- <code>
---     myclock_t:remove_from_object(obj1)<br/>
---     myclock_t:remove_from_object(obj2)<br/>
--- </code>
--- Now the same tooltip is only attached to <code>myclock</code>.<br/>
--- </p>
--- awful.tooltip
-local tooltip = { mt = {} }
-
-local data = setmetatable({}, { __mode = 'k' })
-
 --- Tooltip object definition.
--- @name tooltip
+-- @table awful.tooltip
 -- @field wibox The wibox displaying the tooltip.
 -- @field visible True if tooltip is visible.
--- @class table
+local tooltip = { mt = {}  }
 
--- Tooltip private data.
--- @name awful.tooltip.data
+--- Tooltip private data.
+-- @local
+-- @table awful.tooltip.data
 -- @field fg tooltip foreground color.
 -- @field font Tooltip font.
 -- @field hide The hide() function.
 -- @field show The show() function.
 -- @field timer The text update timer.
 -- @field timer_function The text update timer function.
+local data = setmetatable({}, { __mode = 'k' })
 
--- Place to tooltip on th screen.
+-- Place the tooltip on the screen.
 -- @param self A tooltip object.
 local function place(self)
     a_placement.under_mouse(self.wibox)
@@ -75,6 +76,7 @@ local function place(self)
 end
 
 -- Place the tooltip under the mouse.
+--
 -- @param self A tooltip object.
 local function set_geometry(self)
     local my_geo = self.wibox:geometry()
@@ -86,6 +88,7 @@ local function set_geometry(self)
 end
 
 -- Show a tooltip.
+--
 -- @param self The tooltip to show.
 local function show(self)
     -- do nothing if the tooltip is already shown
@@ -103,6 +106,7 @@ local function show(self)
 end
 
 -- Hide a tooltip.
+--
 -- @param self The tooltip to hide.
 local function hide(self)
     -- do nothing if the tooltip is already hidden
@@ -117,76 +121,96 @@ local function hide(self)
 end
 
 --- Change displayed text.
+--
 -- @param self The tooltip object.
 -- @param text New tooltip text.
-local function set_text(self, text)
+tooltip.set_text = function(self, text)
     self.textbox:set_text(text)
     set_geometry(self)
 end
 
 --- Change displayed text.
+--
 -- @param self The tooltip object.
 -- @param text New tooltip text, including pango markup.
-local function set_markup(self, text)
+tooltip.set_markup = function(self, text)
     self.textbox:set_markup(text)
     set_geometry(self)
 end
 
 --- Change the tooltip's update interval.
+--
 -- @param self A tooltip object.
 -- @param timeout The timeout value.
-local function set_timeout(self, timeout)
+-- @function set_timeout
+tooltip.set_timeout = function(self, timeout)
     if data[self].timer then
         data[self].timer.timeout = timeout
     end
 end
 
 --- Add tooltip to an object.
+--
 -- @param self The tooltip.
 -- @param object An object.
-local function add_to_object(self, object)
+tooltip.add_to_object = function(self, object)
     object:connect_signal("mouse::enter", data[self].show)
     object:connect_signal("mouse::leave", data[self].hide)
 end
 
 --- Remove tooltip from an object.
+--
 -- @param self The tooltip.
 -- @param object An object.
-local function remove_from_object(self, object)
+-- @function remove_from_object
+tooltip.remove_from_object = function(self, object)
     object:disconnect_signal("mouse::enter", data[self].show)
     object:disconnect_signal("mouse::leave", data[self].hide)
 end
 
 
 --- Create a new tooltip and link it to a widget.
--- @param args Arguments for tooltip creation may containt:<br/>
--- <code>timeout</code>: The timeout value for update_func.<br/>
--- <code>timer_function</code>: A function to dynamically change the tooltip
---     text.<br/>
--- <code>objects</code>: A list of objects linked to the tooltip.<br/>
+-- @tparam table    args Arguments for tooltip creation.
+-- @tparam number   args.timeout The timeout value for update_func.
+-- @tparam function args.timer_function A function to dynamically change the
+--                                      tooltip text.
+-- @tparam table    args.objects A list of objects linked to the tooltip.
+-- @tparam number   args.delay_show Delay showing the tooltip by this many
+--                                  seconds.
 -- @return The created tooltip.
 -- @see add_to_object
 -- @see set_timeout
 -- @see set_text
 -- @see set_markup
-local function new(args)
+tooltip.new = function(args)
     local self = {
         wibox =  wibox({ }),
         visible = false,
     }
 
     -- private data
+    local delay_timeout
+    if args.delay_show then
+        delay_timeout = timer { timeout = args.delay_show }
+        delay_timeout:connect_signal("timeout", function () show(self) end)
+    end
     data[self] = {
-        show = function() show(self) end,
-        hide = function() hide(self) end
+        show = function()
+            if delay_timeout then delay_timeout:start()
+            else show(self) end
+        end,
+        hide = function()
+            if delay_timeout then delay_timeout:stop() end
+            hide(self)
+        end,
     }
 
     -- export functions
-    self.set_text = set_text
-    self.set_markup = set_markup
-    self.set_timeout = set_timeout
-    self.add_to_object = add_to_object
-    self.remove_from_object = remove_from_object
+    self.set_text = tooltip.set_text
+    self.set_markup = tooltip.set_markup
+    self.set_timeout = tooltip.set_timeout
+    self.add_to_object = tooltip.add_to_object
+    self.remove_from_object = tooltip.remove_from_object
 
     -- setup the timer action only if needed
     if args.timer_function then
@@ -229,9 +253,9 @@ local function new(args)
 end
 
 function tooltip.mt:__call(...)
-    return new(...)
+    return tooltip.new(...)
 end
 
 return setmetatable(tooltip, tooltip.mt)
 
--- vim: ft=lua:et:sw=4:ts=4:sts=4:enc=utf-8:tw=78
+-- vim: ft=lua:et:sw=4:ts=4:sts=4:tw=78

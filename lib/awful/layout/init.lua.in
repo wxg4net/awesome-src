@@ -1,7 +1,10 @@
 ---------------------------------------------------------------------------
+--- Layout module for awful
+--
 -- @author Julien Danjou &lt;julien@danjou.info&gt;
 -- @copyright 2008 Julien Danjou
 -- @release @AWESOME_VERSION@
+-- @module awful.layout
 ---------------------------------------------------------------------------
 
 -- Grab environment we need
@@ -16,10 +19,13 @@ local capi = {
     client = client
 }
 local client = require("awful.client")
+local timer = require("gears.timer")
 
---- Layout module for awful
--- awful.layout
 local layout = {}
+
+--- Default predefined layouts
+--
+-- @fixme Add documentation on available layouts as all of them are hidden
 layout.suit = require("awful.layout.suit")
 
 -- The default list of layouts
@@ -41,6 +47,8 @@ layout.layouts = {
 -- This is a special lock used by the arrange function.
 -- This avoids recurring call by emitted signals.
 local arrange_lock = false
+-- Delay one arrange call per screen.
+local delayed_arrange = {}
 
 --- Get the current layout.
 -- @param screen The screen number.
@@ -53,7 +61,7 @@ end
 --- Change the layout of the current tag.
 -- @param i Relative index.
 -- @param s The screen number. 
--- @param layouts A table of layouts. (optional)
+-- @param[opt] layouts A table of layouts.
 function layout.inc(i, s, layouts)
     local t = tag.selected(s)
     local layouts = layouts or layout.layouts
@@ -94,24 +102,38 @@ end
 --- Arrange a screen using its current layout.
 -- @param screen The screen to arrange.
 function layout.arrange(screen)
-    if arrange_lock then return end
-    arrange_lock = true
-    local p = {}
-    p.workarea = capi.screen[screen].workarea
-    -- Handle padding
-    local padding = ascreen.padding(capi.screen[screen])
-    if padding then
-        p.workarea.x = p.workarea.x + (padding.left or 0)
-        p.workarea.y = p.workarea.y + (padding.top or 0)
-        p.workarea.width = p.workarea.width - ((padding.left or 0 ) + (padding.right or 0))
-        p.workarea.height = p.workarea.height - ((padding.top or 0) + (padding.bottom or 0))
-    end
-    p.geometry = capi.screen[screen].geometry
-    p.clients = client.tiled(screen)
-    p.screen = screen
-    layout.get(screen).arrange(p)
-    capi.screen[screen]:emit_signal("arrange")
-    arrange_lock = false
+    if not screen or delayed_arrange[screen] then return end
+    delayed_arrange[screen] = true
+
+    timer.delayed_call(function()
+        if arrange_lock then return end
+        arrange_lock = true
+
+        local p = {}
+        p.workarea = capi.screen[screen].workarea
+        -- Handle padding
+        local padding = ascreen.padding(capi.screen[screen])
+        if padding then
+            p.workarea.x = p.workarea.x + (padding.left or 0)
+            p.workarea.y = p.workarea.y + (padding.top or 0)
+            p.workarea.width = p.workarea.width - ((padding.left or 0 ) + (padding.right or 0))
+            p.workarea.height = p.workarea.height - ((padding.top or 0) + (padding.bottom or 0))
+        end
+        p.geometry = capi.screen[screen].geometry
+        p.clients = client.tiled(screen)
+        p.screen = screen
+        p.geometries = setmetatable({}, {__mode = "k"})
+        layout.get(screen).arrange(p)
+        for c, g in pairs(p.geometries) do
+            g.width = g.width - c.border_width * 2
+            g.height = g.height - c.border_width * 2
+            c:geometry(g)
+        end
+        capi.screen[screen]:emit_signal("arrange")
+
+        arrange_lock = false
+        delayed_arrange[screen] = nil
+    end)
 end
 
 --- Get the current layout name.
@@ -135,10 +157,12 @@ capi.client.connect_signal("property::border_width", arrange_prop)
 capi.client.connect_signal("property::hidden", arrange_prop)
 capi.client.connect_signal("property::floating", arrange_prop)
 capi.client.connect_signal("property::geometry", arrange_prop)
--- If prop is screen, we do not know what was the previous screen, so
--- let's arrange all screens :-(
-capi.client.connect_signal("property::screen", function(c)
-    for screen = 1, capi.screen.count() do layout.arrange(screen) end end)
+capi.client.connect_signal("property::screen", function(c, old_screen)
+    if old_screen then
+        layout.arrange(old_screen)
+    end
+    layout.arrange(c.screen)
+end)
 
 local function arrange_on_tagged(c, tag)
     if not tag.screen then return end

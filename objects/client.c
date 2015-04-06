@@ -301,9 +301,6 @@ client_focus_update(client_t *c)
 {
     lua_State *L = globalconf_get_lua_State();
 
-    if(!client_maybevisible(c))
-        return false;
-
     if(globalconf.focus.client && globalconf.focus.client != c)
     {
         /* When we are called due to a FocusIn event (=old focused client
@@ -354,7 +351,7 @@ client_focus_refresh(void)
         return;
     globalconf.focus.need_update = false;
 
-    if(c)
+    if(c && client_maybevisible(c))
     {
         /* Make sure this window is unbanned and e.g. not minimized */
         client_unban(c);
@@ -870,10 +867,15 @@ client_set_minimized(lua_State *L, int cidx, bool s)
             xwindow_set_state(c->window, XCB_ICCCM_WM_STATE_ICONIC);
 
             uint32_t no_event[] = { 0 };
-            const uint32_t select_input_val[] = { CLIENT_SELECT_INPUT_EVENT_MASK };
+            const uint32_t client_select_input_val[] = { CLIENT_SELECT_INPUT_EVENT_MASK };
+            const uint32_t frame_select_input_val[] = { FRAME_SELECT_INPUT_EVENT_MASK };
             xcb_grab_server(globalconf.connection);
             xcb_change_window_attributes(globalconf.connection,
                                          globalconf.screen->root,
+                                         XCB_CW_EVENT_MASK,
+                                         no_event);
+            xcb_change_window_attributes(globalconf.connection,
+                                         c->frame_window,
                                          XCB_CW_EVENT_MASK,
                                          no_event);
             xcb_change_window_attributes(globalconf.connection,
@@ -886,9 +888,13 @@ client_set_minimized(lua_State *L, int cidx, bool s)
                                          XCB_CW_EVENT_MASK,
                                          ROOT_WINDOW_EVENT_MASK);
             xcb_change_window_attributes(globalconf.connection,
+                                         c->frame_window,
+                                         XCB_CW_EVENT_MASK,
+                                         frame_select_input_val);
+            xcb_change_window_attributes(globalconf.connection,
                                          c->window,
                                          XCB_CW_EVENT_MASK,
-                                         select_input_val);
+                                         client_select_input_val);
             xcb_ungrab_server(globalconf.connection);
         }
         else
@@ -1135,6 +1141,9 @@ client_unban(client_t *c)
         client_set_minimized(L, -1, false);
         client_set_hidden(L, -1, false);
         lua_pop(L, 1);
+
+        if (globalconf.focus.client == c)
+            globalconf.focus.need_update = true;
     }
 }
 
@@ -1775,6 +1784,34 @@ luaA_client_geometry(lua_State *L)
     return luaA_pusharea(L, c->geometry);
 }
 
+/** Apply size hints to a lua-specified geometry.
+ * \param L The Lua VM state.
+ * \return The number of elements pushed on stack.
+ * \luastack
+ * \lparam Desired width of client.
+ * \lparam Desired height of client.
+ * \lreturn Corrected width.
+ * \lreturn Corrected height.
+ */
+static int
+luaA_client_apply_size_hints(lua_State *L)
+{
+    client_t *c = luaA_checkudata(L, 1, &client_class);
+    area_t geometry = c->geometry;
+    if(!client_isfixed(c))
+    {
+        geometry.width = luaL_checknumber(L, 2);
+        geometry.height = luaL_checknumber(L, 3);
+    }
+
+    if (c->size_hints_honor)
+        geometry = client_apply_size_hints(c, geometry);
+
+    lua_pushnumber(L, geometry.width);
+    lua_pushnumber(L, geometry.height);
+    return 2;
+}
+
 static int
 luaA_client_set_screen(lua_State *L, client_t *c)
 {
@@ -1896,6 +1933,19 @@ luaA_client_get_name(lua_State *L, client_t *c)
 {
     lua_pushstring(L, c->name ? c->name : c->alt_name);
     return 1;
+}
+
+/** Set the client name.
+ * \param L The Lua VM state.
+ * \param client The client to name.
+ * \return The number of elements pushed on stack.
+ */
+static int
+luaA_client_set_name(lua_State *L, client_t *c)
+{
+    const char *name = luaL_checkstring(L, -1);
+    client_set_name(L, 1, a_strdup(name));
+    return 0;
 }
 
 static int
@@ -2276,8 +2326,11 @@ luaA_client_module_newindex(lua_State *L)
 
     if (A_STREQ(buf, "focus"))
     {
-        c = luaA_checkudata(L, 3, &client_class);
-        client_focus(c);
+        c = luaA_checkudataornil(L, 3, &client_class);
+        if (c)
+            client_focus(c);
+        else if (globalconf.focus.client)
+            client_unfocus(globalconf.focus.client);
     }
 
     return 0;
@@ -2308,6 +2361,7 @@ client_class_setup(lua_State *L)
         { "keys", luaA_client_keys },
         { "isvisible", luaA_client_isvisible },
         { "geometry", luaA_client_geometry },
+        { "apply_size_hints", luaA_client_apply_size_hints },
         { "tags", luaA_client_tags },
         { "kill", luaA_client_kill },
         { "swap", luaA_client_swap },
@@ -2329,9 +2383,9 @@ client_class_setup(lua_State *L)
                      client_methods, client_meta);
     luaA_class_set_tostring(&client_class, (lua_class_propfunc_t) client_tostring);
     luaA_class_add_property(&client_class, "name",
-                            NULL,
+                            (lua_class_propfunc_t) luaA_client_set_name,
                             (lua_class_propfunc_t) luaA_client_get_name,
-                            NULL);
+                            (lua_class_propfunc_t) luaA_client_set_name);
     luaA_class_add_property(&client_class, "transient_for",
                             NULL,
                             (lua_class_propfunc_t) luaA_client_get_transient_for,
@@ -2524,6 +2578,7 @@ client_class_setup(lua_State *L)
     signal_add(&client_class.signals, "request::maximized_horizontal");
     signal_add(&client_class.signals, "request::maximized_vertical");
     signal_add(&client_class.signals, "request::tag");
+    signal_add(&client_class.signals, "request::urgent");
     signal_add(&client_class.signals, "tagged");
     signal_add(&client_class.signals, "unfocus");
     signal_add(&client_class.signals, "unmanage");

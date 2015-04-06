@@ -1,15 +1,16 @@
 ---------------------------------------------------------------------------
+--- Maximized and fullscreen layouts module for awful
+--
 -- @author Julien Danjou &lt;julien@danjou.info&gt;
 -- @copyright 2008 Julien Danjou
 -- @release @AWESOME_VERSION@
+-- @module awful.layout.suit.max
 ---------------------------------------------------------------------------
 
 -- Grab environment we need
 local pairs = pairs
 local client = require("awful.client")
 
---- Maximized and fullscreen layouts module for awful
--- awful.layout.suit.max
 local max = {}
 
 local function fmax(p, fs)
@@ -25,10 +26,10 @@ local function fmax(p, fs)
         local g = {
             x = area.x,
             y = area.y,
-            width = area.width - c.border_width * 2,
-            height = area.height - c.border_width * 2
+            width = area.width,
+            height = area.height
         }
-        c:geometry(g)
+        p.geometries[c] = g
     end
 end
 

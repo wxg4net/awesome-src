@@ -1,7 +1,10 @@
 ---------------------------------------------------------------------------
+--- Magnifier layout module for awful
+--
 -- @author Julien Danjou &lt;julien@danjou.info&gt;
 -- @copyright 2008 Julien Danjou
 -- @release @AWESOME_VERSION@
+-- @module awful.layout.suit.magnifier
 ---------------------------------------------------------------------------
 
 -- Grab environment we need
@@ -17,8 +20,6 @@ local capi =
 }
 local client = require("awful.client")
 
---- Magnifier layout module for awful
--- awful.layout.suit.magnifier
 local magnifier = {}
 
 function magnifier.mouse_resize_handler(c, corner, x, y)
@@ -88,10 +89,10 @@ function magnifier.arrange(p)
     local g = {
         x = geometry.x,
         y = geometry.y,
-        width = geometry.width - focus.border_width * 2,
-        height = geometry.height - focus.border_width * 2
+        width = geometry.width,
+        height = geometry.height
     }
-    focus:geometry(g)
+    p.geometries[focus] = g
 
     if #cls > 1 then
         geometry.x = area.x
@@ -111,7 +112,12 @@ function magnifier.arrange(p)
 
         -- First move clients that are before focused client.
         for k = fidx + 1, #cls do
-            cls[k]:geometry(geometry)
+            p.geometries[cls[k]] = {
+                x = geometry.x,
+                y = geometry.y,
+                width = geometry.width,
+                height = geometry.height
+            }
             geometry.y = geometry.y + geometry.height
         end
 
@@ -121,10 +127,10 @@ function magnifier.arrange(p)
             local g = {
                 x = geometry.x,
                 y = geometry.y,
-                width = geometry.width - cls[k].border_width * 2,
-                height = geometry.height - cls[k].border_width * 2
+                width = geometry.width,
+                height = geometry.height
             }
-            cls[k]:geometry(g)
+            p.geometries[cls[k]] = g
             geometry.y = geometry.y + geometry.height
         end
     end

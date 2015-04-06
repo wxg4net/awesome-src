@@ -94,7 +94,7 @@ endif()
 if(EXISTS ${SOURCE_DIR}/.git/HEAD AND GIT_EXECUTABLE)
     # get current version
     execute_process(
-        COMMAND ${GIT_EXECUTABLE} describe
+        COMMAND ${GIT_EXECUTABLE} describe --dirty
         WORKING_DIRECTORY ${SOURCE_DIR}
         OUTPUT_VARIABLE VERSION
         OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -235,6 +235,13 @@ else()
     set(XDG_CONFIG_DIR ${SYSCONFDIR}/xdg CACHE PATH "xdg config directory")
 endif()
 
+# setting AWESOME_DATA_PATH
+if(DEFINED AWESOME_DATA_PATH)
+    set(AWESOME_DATA_PATH ${AWESOME_DATA_PATH} CACHE PATH "awesome share directory")
+else()
+    set(AWESOME_DATA_PATH ${CMAKE_INSTALL_PREFIX}/share/${PROJECT_AWE_NAME} CACHE PATH "awesome share directory")
+endif()
+
 # setting AWESOME_DOC_PATH
 if(DEFINED AWESOME_DOC_PATH)
     set(AWESOME_DOC_PATH ${AWESOME_DOC_PATH} CACHE PATH "awesome docs directory")
@@ -265,18 +272,22 @@ set(AWESOME_COMPILE_HOSTNAME ${BUILDHOSTNAME})
 set(AWESOME_COMPILE_BY       $ENV{USER})
 set(AWESOME_RELEASE          ${CODENAME})
 set(AWESOME_SYSCONFDIR       ${XDG_CONFIG_DIR}/${PROJECT_AWE_NAME})
-set(AWESOME_DATA_PATH        ${CMAKE_INSTALL_PREFIX}/share/${PROJECT_AWE_NAME})
 set(AWESOME_LUA_LIB_PATH     ${AWESOME_DATA_PATH}/lib)
 set(AWESOME_ICON_PATH        ${AWESOME_DATA_PATH}/icons)
 set(AWESOME_THEMES_PATH      ${AWESOME_DATA_PATH}/themes)
 # }}}
 
 # {{{ Configure files
-file(GLOB_RECURSE awesome_lua_configure_files RELATIVE ${SOURCE_DIR} ${SOURCE_DIR}/lib/*.lua.in ${SOURCE_DIR}/themes/*/*.lua.in)
+file(GLOB_RECURSE awesome_lua_configure_files RELATIVE
+    ${SOURCE_DIR}
+    ${SOURCE_DIR}/lib/*.lua.in
+    ${SOURCE_DIR}/docs/capi/*.lua.in
+    ${SOURCE_DIR}/docs/*.md
+    ${SOURCE_DIR}/themes/*/*.lua.in)
 set(AWESOME_CONFIGURE_FILES
     ${awesome_lua_configure_files}
     config.h.in
-    config.ld.in
+    docs/config.ld.in
     awesomerc.lua.in
     awesome-version-internal.h.in
     awesome.doxygen.in)
@@ -295,4 +306,4 @@ foreach(file ${AWESOME_CONFIGURE_FILES})
 endforeach()
 #}}}
 
-# vim: filetype=cmake:expandtab:shiftwidth=4:tabstop=8:softtabstop=4:textwidth=80
+# vim: filetype=cmake:expandtab:shiftwidth=4:tabstop=8:softtabstop=4:textwidth=80:foldmethod=marker

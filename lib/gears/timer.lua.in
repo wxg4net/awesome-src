@@ -1,25 +1,32 @@
 ---------------------------------------------------------------------------
+--- Timer objects and functions.
+--
 -- @author Uli Schlachter
 -- @copyright 2014 Uli Schlachter
 -- @release @AWESOME_VERSION@
+-- @module gears.timer
 ---------------------------------------------------------------------------
 
-local setmetatable = setmetatable
+local capi = { awesome = awesome }
+local ipairs = ipairs
 local pairs = pairs
+local setmetatable = setmetatable
+local table = table
 local tonumber = tonumber
 local traceback = debug.traceback
+local unpack = unpack or table.unpack -- v5.1: unpack, v5.2: table.unpack
 local glib = require("lgi").GLib
 local object = require("gears.object")
 
 --- Timer objects. This type of object is useful when triggering events repeatedly.
 -- The timer will emit the "timeout" signal every N seconds, N being the timeout
 -- value.
--- @field timeout Interval in seconds to emit the timeout signal. Can be any
--- value, including floating point ones (i.e. 1.5 seconds).
--- @field started Read-only boolean field indicating if the timer has been
--- started.
--- @class table
--- @name timer
+-- @tfield number timeout Interval in seconds to emit the timeout signal.
+--                        Can be any value, including floating point ones
+--                        (e.g. 1.5 seconds).
+-- @tfield boolean started Read-only boolean field indicating if the timer has been
+--                         started.
+-- @table timer
 
 local timer = { mt = {} }
 
@@ -77,7 +84,11 @@ local timer_instance_mt = {
     end
 }
 
-local function new(args)
+--- Create a new timer object.
+-- @tparam table args Arguments.
+-- @tparam number args.timeout Timeout in seconds (e.g. 1.5).
+-- @treturn timer
+timer.new = function(args)
     local ret = object()
 
     ret:add_signal("property::timeout")
@@ -93,8 +104,27 @@ local function new(args)
     return ret
 end
 
+local delayed_calls = {}
+capi.awesome.connect_signal("refresh", function()
+    for _, callback in ipairs(delayed_calls) do
+        local success, message = pcall(unpack(callback))
+        if not success then
+            print(message)
+        end
+    end
+    delayed_calls = {}
+end)
+
+--- Call the given function at the end of the current main loop iteration
+-- @tparam function callback The function that should be called
+-- @param ... Arguments to the callback function
+function timer.delayed_call(callback, ...)
+    assert(type(callback) == "function", "callback must be a function, got: " .. type(callback))
+    table.insert(delayed_calls, { callback, ... })
+end
+
 function timer.mt:__call(...)
-    return new(...)
+    return timer.new(...)
 end
 
 return setmetatable(timer, timer.mt)

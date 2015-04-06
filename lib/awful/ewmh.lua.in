@@ -1,7 +1,10 @@
 ---------------------------------------------------------------------------
+--- Implements EWMH requests handling.
+--
 -- @author Julien Danjou &lt;julien@danjou.info&gt;
 -- @copyright 2009 Julien Danjou
 -- @release @AWESOME_VERSION@
+-- @module awful.ewmh
 ---------------------------------------------------------------------------
 
 local setmetatable = setmetatable
@@ -10,9 +13,8 @@ local screen = screen
 local ipairs = ipairs
 local math = math
 local atag = require("awful.tag")
+local aclient = require("awful.client")
 
---- Implements EWMH requests handling.
--- awful.ewmh
 local ewmh = {}
 
 local data = setmetatable({}, { __mode = 'k' })
@@ -24,7 +26,8 @@ local function store_geometry(window, reqtype)
     data[window][reqtype].screen = window.screen
 end
 
--- Maximize a window horizontally.
+--- Maximize a window horizontally.
+--
 -- @param window The window.
 -- @param set Set or unset the maximized values.
 local function maximized_horizontal(window, set)
@@ -41,7 +44,8 @@ local function maximized_horizontal(window, set)
     end
 end
 
--- Maximize a window vertically.
+--- Maximize a window vertically.
+--
 -- @param window The window.
 -- @param set Set or unset the maximized values.
 local function maximized_vertical(window, set)
@@ -58,7 +62,8 @@ local function maximized_vertical(window, set)
     end
 end
 
--- Fullscreen a window.
+--- Fullscreen a window.
+--
 -- @param window The window.
 -- @param set Set or unset the fullscreen values.
 local function fullscreen(window, set)
@@ -114,8 +119,13 @@ local function screen_change(window)
     end
 end
 
--- Update a client's settings when its border width changes
-local function border_change(window)
+--- Update a client's settings when its geometry changes, skipping signals
+-- resulting from calls within.
+local geometry_change_lock = false
+local function geometry_change(window)
+    if geometry_change_lock then return end
+    geometry_change_lock = true
+
     -- Fix up the geometry in case this window needs to cover the whole screen.
     local bw = window.border_width or 0
     local g = screen[window.screen].workarea
@@ -126,14 +136,16 @@ local function border_change(window)
         window:geometry { width = g.width - 2*bw, x = g.x }
     end
     if window.fullscreen then
-        -- This *will* cause an endless loop if some other property::border_width
-        -- signal dares to change the border width, too, so don't do that!
         window.border_width = 0
         window:geometry(screen[window.screen].geometry)
     end
+
+    geometry_change_lock = false
 end
 
--- Activate a window
+--- Activate a window
+--
+-- @client c A client to use
 function ewmh.activate(c)
     if awesome.startup or c:isvisible() then
         client.focus = c
@@ -143,7 +155,10 @@ function ewmh.activate(c)
     end
 end
 
--- Tag a window with its requested tag
+--- Tag a window with its requested tag
+--
+-- @client c A client to tag
+-- @tag[opt] t A tag to use. If omitted, then the client is made sticky.
 function ewmh.tag(c, t)
     if not t then
         c.sticky = true
@@ -153,13 +168,21 @@ function ewmh.tag(c, t)
     end
 end
 
+function ewmh.urgent(c, urgent)
+    if c ~= client.focus and not aclient.property.get(c,"ignore_urgent") then
+        c.urgent = urgent
+    end
+end
+
 client.connect_signal("request::activate", ewmh.activate)
 client.connect_signal("request::tag", ewmh.tag)
+client.connect_signal("request::urgent", ewmh.urgent)
 client.connect_signal("request::maximized_horizontal", maximized_horizontal)
 client.connect_signal("request::maximized_vertical", maximized_vertical)
 client.connect_signal("request::fullscreen", fullscreen)
 client.connect_signal("property::screen", screen_change)
-client.connect_signal("property::border_width", border_change)
+client.connect_signal("property::border_width", geometry_change)
+client.connect_signal("property::geometry", geometry_change)
 
 return ewmh
 

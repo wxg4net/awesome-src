@@ -35,7 +35,7 @@
 #define _NET_WM_STATE_TOGGLE 2
 
 /** Update client EWMH hints.
- * \param c The client.
+ * \param L The Lua VM state.
  */
 static int
 ewmh_client_update_hints(lua_State *L)
@@ -346,12 +346,18 @@ ewmh_process_state_atom(client_t *c, xcb_atom_t state, int set)
     }
     else if(state == _NET_WM_STATE_DEMANDS_ATTENTION)
     {
-        if(set == _NET_WM_STATE_REMOVE)
-            client_set_urgent(L, -1, false);
-        else if(set == _NET_WM_STATE_ADD)
-            client_set_urgent(L, -1, true);
-        else if(set == _NET_WM_STATE_TOGGLE)
-            client_set_urgent(L, -1, !c->urgent);
+        if(set == _NET_WM_STATE_REMOVE) {
+            lua_pushboolean(L, false);
+            luaA_object_emit_signal(L, -2, "request::urgent", 1);
+        }
+        else if(set == _NET_WM_STATE_ADD) {
+            lua_pushboolean(L, true);
+            luaA_object_emit_signal(L, -2, "request::urgent", 1);
+        }
+        else if(set == _NET_WM_STATE_TOGGLE) {
+            lua_pushboolean(L, !c->urgent);
+            luaA_object_emit_signal(L, -2, "request::urgent", 1);
+        }
     }
 
     lua_pop(L, 1);
@@ -556,7 +562,6 @@ ewmh_client_check_hints(client_t *c)
 
 /** Process the WM strut of a client.
  * \param c The client.
- * \param strut_r (Optional) An existing reply.
  */
 void
 ewmh_process_client_strut(client_t *c)

@@ -1,15 +1,16 @@
 ---------------------------------------------------------------------------
+--- Fair layouts module for awful
+--
 -- @author Josh Komoroske
 -- @copyright 2012 Josh Komoroske
 -- @release @AWESOME_VERSION@
+-- @module awful.layout.suit.fair
 ---------------------------------------------------------------------------
 
 -- Grab environment we need
 local ipairs = ipairs
 local math = math
 
---- Fair layouts module for awful
--- awful.layout.suit.fair
 local fair = {}
 
 local function do_fair(p, orientation)
@@ -64,8 +65,6 @@ local function do_fair(p, orientation)
                 g.x = g.width * col
             end
 
-            g.height = g.height - c.border_width * 2
-            g.width = g.width - c.border_width * 2
             g.y = g.y + wa.y
             g.x = g.x + wa.x
 
@@ -75,7 +74,7 @@ local function do_fair(p, orientation)
                 g.x, g.y = g.y, g.x
             end
 
-            c:geometry(g)
+            p.geometries[c] = g
         end
     end
 end
@@ -88,7 +87,7 @@ function fair.horizontal.arrange(p)
     return do_fair(p, "east")
 end
 
--- Vertical fair layout.
+--- Vertical fair layout.
 -- @param screen The screen to arrange.
 fair.name = "fairv"
 function fair.arrange(p)

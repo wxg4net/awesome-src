@@ -1,7 +1,10 @@
 ---------------------------------------------------------------------------
+--- Utility module for menubar
+--
 -- @author Antonio Terceiro
 -- @copyright 2009, 2011-2012 Antonio Terceiro, Alexander Yakushev
 -- @release @AWESOME_VERSION@
+-- @module menubar.utils
 ---------------------------------------------------------------------------
 
 -- Grab environment
@@ -11,9 +14,9 @@ local ipairs = ipairs
 local string = string
 local awful_util = require("awful.util")
 local theme = require("beautiful")
+local glib = require("lgi").GLib
+local wibox = require("wibox")
 
--- Utility module for menubar
--- menubar.utils
 local utils = {}
 
 -- NOTE: This icons/desktop files module was written according to the
@@ -26,7 +29,7 @@ local utils = {}
 --- Terminal which applications that need terminal would open in.
 utils.terminal = 'xterm'
 
--- The default icon for applications that don't provide any icon in
+--- The default icon for applications that don't provide any icon in
 -- their .desktop files.
 local default_icon = nil
 
@@ -48,11 +51,10 @@ local all_icon_sizes = {
     '16x16'
 }
 
--- List of supported icon formats. Ignore SVG because Awesome doesn't
--- support it.
-local icon_formats = { "png", "xpm" }
+--- List of supported icon formats.
+local icon_formats = { "png", "xpm", "svg" }
 
--- Check whether the icon format is supported.
+--- Check whether the icon format is supported.
 -- @param icon_file Filename of the icon.
 -- @return true if format is supported, false otherwise.
 local function is_format_supported(icon_file)
@@ -62,6 +64,35 @@ local function is_format_supported(icon_file)
         end
     end
     return false
+end
+
+local icon_lookup_path = nil
+local function get_icon_lookup_path()
+    if not icon_lookup_path then
+        icon_lookup_path = {}
+        local icon_theme_paths = {}
+        local icon_theme = theme.icon_theme
+        local paths = glib.get_system_data_dirs()
+        table.insert(paths, 1, glib.get_user_data_dir())
+        table.insert(paths, 1, glib.get_home_dir() .. '/.icons')
+        for k,dir in ipairs(paths)do
+            if icon_theme then
+                table.insert(icon_theme_paths, dir..'/icons/' .. icon_theme .. '/')
+            end
+            table.insert(icon_theme_paths, dir..'/icons/hicolor/') -- fallback theme
+        end
+        for i, icon_theme_directory in ipairs(icon_theme_paths) do
+            for j, size in ipairs(all_icon_sizes) do
+                table.insert(icon_lookup_path, icon_theme_directory .. size .. '/apps/')
+            end
+        end
+        for k,dir in ipairs(paths)do
+            -- lowest priority fallbacks
+            table.insert(icon_lookup_path, dir..'/pixmaps/')
+            table.insert(icon_lookup_path, dir..'/icons/')
+        end
+    end
+    return icon_lookup_path
 end
 
 --- Lookup an icon in different folders of the filesystem.
@@ -75,32 +106,9 @@ function utils.lookup_icon(icon_file)
     if icon_file:sub(1, 1) == '/' and is_format_supported(icon_file) then
         -- If the path to the icon is absolute and its format is
         -- supported, do not perform a lookup.
-        return icon_file
+        return awful_util.file_readable(icon_file) and icon_file or nil
     else
-        local icon_path = {}
-        local icon_theme_paths = {}
-        local icon_theme = theme.icon_theme
-        if icon_theme then
-            table.insert(icon_theme_paths, '/usr/share/icons/' .. icon_theme .. '/')
-            -- TODO also look in parent icon themes, as in freedesktop.org specification
-        end
-        table.insert(icon_theme_paths, '/usr/share/icons/hicolor/') -- fallback theme
-
-        for i, icon_theme_directory in ipairs(icon_theme_paths) do
-            for j, size in ipairs(all_icon_sizes) do
-                table.insert(icon_path, icon_theme_directory .. size .. '/apps/')
-                table.insert(icon_path, icon_theme_directory .. size .. '/actions/')
-                table.insert(icon_path, icon_theme_directory .. size .. '/devices/')
-                table.insert(icon_path, icon_theme_directory .. size .. '/places/')
-                table.insert(icon_path, icon_theme_directory .. size .. '/categories/')
-                table.insert(icon_path, icon_theme_directory .. size .. '/status/')
-            end
-        end
-        -- lowest priority fallbacks
-        table.insert(icon_path, '/usr/share/pixmaps/')
-        table.insert(icon_path, '/usr/share/icons/')
-
-        for i, directory in ipairs(icon_path) do
+        for i, directory in ipairs(get_icon_lookup_path()) do
             if is_format_supported(icon_file) and awful_util.file_readable(directory .. icon_file) then
                 return directory .. icon_file
             else
@@ -177,6 +185,9 @@ function utils.parse(file)
     if program.Exec then
         -- Substitute Exec special codes as specified in
         -- http://standards.freedesktop.org/desktop-entry-spec/1.1/ar01s06.html
+        if program.Name == nil then
+            program.Name = '['.. file:match("([^/]+)%.desktop$") ..']'
+        end
         local cmdline = program.Exec:gsub('%%c', program.Name)
         cmdline = cmdline:gsub('%%[fuFU]', '')
         cmdline = cmdline:gsub('%%k', program.file)
@@ -207,6 +218,14 @@ function utils.parse_dir(dir)
         end
     end
     return programs
+end
+
+--- Compute text width.
+-- @tparam str text Text.
+-- @treturn int Text width.
+function utils.compute_text_width(text)
+    local _, logical = wibox.widget.textbox(awful_util.escape(text))._layout:get_pixel_extents()
+    return logical.width
 end
 
 return utils

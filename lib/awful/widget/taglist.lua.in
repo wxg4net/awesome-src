@@ -1,7 +1,10 @@
 ---------------------------------------------------------------------------
+--- Taglist widget module for awful
+--
 -- @author Julien Danjou &lt;julien@danjou.info&gt;
 -- @copyright 2008-2009 Julien Danjou
 -- @release @AWESOME_VERSION@
+-- @classmod awful.widget.taglist
 ---------------------------------------------------------------------------
 
 -- Grab environment we need
@@ -20,8 +23,6 @@ local beautiful = require("beautiful")
 local fixed = require("wibox.layout.fixed")
 local surface = require("gears.surface")
 
---- Taglist widget module for awful
--- awful.widget.taglist
 local taglist = { mt = {} }
 taglist.filter = {}
 
@@ -43,7 +44,7 @@ function taglist.taglist_label(t, args)
     local taglist_squares_resize = theme.taglist_squares_resize or args.squares_resize or "true"
     local taglist_disable_icon = args.taglist_disable_icon or theme.taglist_disable_icon or false
     local font = args.font or theme.taglist_font or theme.font or ""
-    local text = "<span font_desc='"..font.."'>"
+    local text = nil
     local sel = capi.client.focus
     local bg_color = nil
     local fg_color = nil
@@ -85,12 +86,9 @@ function taglist.taglist_label(t, args)
             if bg_empty then bg_color = bg_empty end
             if fg_empty then fg_color = fg_empty end
         end
-        for k, c in pairs(cls) do
-            if c.urgent then
-                if bg_urgent then bg_color = bg_urgent end
-                if fg_urgent then fg_color = fg_urgent end
-                break
-            end
+        if tag.getproperty(t, "urgent") then
+            if bg_urgent then bg_color = bg_urgent end
+            if fg_urgent then fg_color = fg_urgent end
         end
     end
     if t.selected then
@@ -98,14 +96,15 @@ function taglist.taglist_label(t, args)
         fg_color = fg_focus
     end
     if not tag.getproperty(t, "icon_only") then
+        text = "<span font_desc='"..font.."'>"
         if fg_color then
             text = text .. "<span color='"..util.color_strip_alpha(fg_color).."'>" ..
                 (util.escape(t.name) or "") .. "</span>"
         else
             text = text .. (util.escape(t.name) or "")
         end
+        text = text .. "</span>"
     end
-    text = text .. "</span>"
     if not taglist_disable_icon then
         if tag.geticon(t) and type(tag.geticon(t)) == "image" then
             icon = tag.geticon(t)
@@ -140,20 +139,20 @@ end
 -- @param filter Filter function to define what clients will be listed.
 -- @param buttons A table with buttons binding to set.
 -- @param style The style overrides default theme.
--- @param update_function Optional function to create a tag widget on each
+-- @param[opt] update_function Function to create a tag widget on each
 --        update. @see awful.widget.common.
--- @param base_widget Optional container widget for tag widgets. Default
+-- @param[opt] base_widget Optional container widget for tag widgets. Default
 --        is wibox.layout.fixed.horizontal().
--- bg_focus The background color for focused client.
--- fg_focus The foreground color for focused client.
--- bg_urgent The background color for urgent clients.
--- fg_urgent The foreground color for urgent clients.
--- squares_sel Optional: a user provided image for selected squares.
--- squares_unsel Optional: a user provided image for unselected squares.
--- squares_sel_empty Optional: a user provided image for selected squares for empty tags.
--- squares_unsel_empty Optional: a user provided image for unselected squares for empty tags.
--- squares_resize Optional: true or false to resize squares.
--- font The font.
+-- @param base_widget.bg_focus The background color for focused client.
+-- @param base_widget.fg_focus The foreground color for focused client.
+-- @param base_widget.bg_urgent The background color for urgent clients.
+-- @param base_widget.fg_urgent The foreground color for urgent clients.
+-- @param[opt] base_widget.squares_sel A user provided image for selected squares.
+-- @param[opt] base_widget.squares_unsel A user provided image for unselected squares.
+-- @param[opt] base_widget.squares_sel_empty A user provided image for selected squares for empty tags.
+-- @param[opt] base_widget.squares_unsel_empty A user provided image for unselected squares for empty tags.
+-- @param[opt] base_widget.squares_resize True or false to resize squares.
+-- @param base_widget.font The font.
 function taglist.new(screen, filter, buttons, style, update_function, base_widget)
     local uf = update_function or common.list_update
     local w = base_widget or fixed.horizontal()
@@ -175,7 +174,7 @@ function taglist.new(screen, filter, buttons, style, update_function, base_widge
     tag.attached_connect_signal(screen, "property::activated", ut)
     tag.attached_connect_signal(screen, "property::screen", ut)
     tag.attached_connect_signal(screen, "property::index", ut)
-    capi.client.connect_signal("property::urgent", uc)
+    tag.attached_connect_signal(screen, "property::urgent", ut)
     capi.client.connect_signal("property::screen", function(c)
         -- If client change screen, refresh it anyway since we don't from
         -- which screen it was coming :-)

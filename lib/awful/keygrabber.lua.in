@@ -1,7 +1,10 @@
 ---------------------------------------------------------------------------
+--- Keygrabber Stack
+--
 -- @author dodo
 -- @copyright 2012 dodo
 -- @release @AWESOME_VERSION@
+-- @module awful.keygrabber
 ---------------------------------------------------------------------------
 
 local ipairs = ipairs
@@ -9,8 +12,6 @@ local table = table
 local capi = {
     keygrabber = keygrabber }
 
---- Keygrabber Stack
--- awful.keygrabber
 local keygrabber = {}
 
 -- Private data
@@ -28,7 +29,8 @@ local function grabber(mod, key, event)
 end
 
 --- Stop grabbing the keyboard for the provided callback.
--- When no callback is given, the least grabber gets removed (last one added to the stack).
+-- When no callback is given, the last grabber gets removed (last one added to
+-- the stack).
 -- @param g The key grabber that must be removed.
 function keygrabber.stop(g)
     for i, v in ipairs(grabbers) do
@@ -37,7 +39,7 @@ function keygrabber.stop(g)
             break
         end
     end
-    -- stop the global key grabber if the last grabber disappears from stack
+    -- Stop the global key grabber if the last grabber disappears from stack.
     if #grabbers == 0 then
         keygrabbing = false
         capi.keygrabber.stop()
@@ -52,16 +54,15 @@ end
 -- to the top of the stack.
 --
 -- The callback function receives three arguments:
--- <ul>
---   <li>a table containing modifiers keys</li>
---   <li>a string with the pressed key</li>
---   <li>a string with either "press" or "release" to indicate the event type</li>
--- </ul>
 --
--- A callback can return <code>false</code> to pass the events to the next
+-- * a table containing modifiers keys
+-- * a string with the pressed key
+-- * a string with either "press" or "release" to indicate the event type
+--
+-- A callback can return `false` to pass the events to the next
 -- keygrabber in the stack.
 -- @param g The key grabber callback that will get the key events until it will be deleted or a new grabber is added.
--- @return the given callback <code>g</code>.
+-- @return the given callback `g`.
 -- @usage
 -- -- The following function can be bound to a key, and be used to resize a
 -- -- client using the keyboard.
