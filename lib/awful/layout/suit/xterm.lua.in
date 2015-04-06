@@ -1,0 +1,45 @@
+---------------------------------------------------------------------------
+--- Fair layouts module for awful
+--
+-- @author wxg
+-- @copyright 2015 Josh wxg
+-- @release @AWESOME_VERSION@
+-- @module awful.layout.suit.xterm
+---------------------------------------------------------------------------
+
+-- Grab environment we need
+local ipairs = ipairs
+local math = math
+
+local xterm = {}
+
+local function do_xterm(p)
+    local wa = p.workarea
+    local cls = p.clients
+    
+    if #cls > 0 then
+        local rows, cols = #cls, 1
+        local height = math.ceil(wa.height / rows)
+        for k, c in ipairs(cls) do
+            k = rows - k
+            local g = {}
+            
+            g.height = height
+            g.width  = wa.width
+            g.y = g.height * k + wa.y
+            g.x = 0 + wa.x
+            
+            p.geometries[c] = g
+        end
+    end
+end
+
+
+--- Vertical xterm layout.
+-- @param screen The screen to arrange.
+xterm.name = "xtermv"
+function xterm.arrange(p)
+    return do_xterm(p)
+end
+
+return xterm

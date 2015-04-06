@@ -37,6 +37,7 @@ layout.layouts = {
     layout.suit.tile.top,
     layout.suit.fair,
     layout.suit.fair.horizontal,
+    layout.suit.xterm,
     layout.suit.spiral,
     layout.suit.spiral.dwindle,
     layout.suit.max,
