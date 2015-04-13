@@ -21,7 +21,7 @@ local function do_xterm(p)
         local rows, cols = #cls, 1
         local height = math.ceil(wa.height / rows)
         for k, c in ipairs(cls) do
-            k = rows - k
+            k = k - 1
             local g = {}
             
             g.height = height
