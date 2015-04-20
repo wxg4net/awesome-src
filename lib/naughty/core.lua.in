@@ -571,11 +571,12 @@ function naughty.notify(args)
                 icon_w = rate*icon_w
                 icon_h = rate*icon_h
             end
-            if icon_h < 100 and icon_w < 100 then
+            local icon_wh_min = 60
+            if icon_h < icon_wh_min and icon_w < icon_wh_min then
                 if icon_w > icon_h then
-                    rate = 100/icon_w
+                    rate = icon_wh_min/icon_w
                 else
-                    rate = 100/icon_h
+                    rate = icon_wh_min/icon_h
                 end
                 icon_w = rate*icon_w
                 icon_h = rate*icon_h
